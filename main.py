@@ -44,8 +44,6 @@ async def multiplication(interaction: discord.Interaction, a: int, b: int):
     await interaction.response.send_message(f"Résultat : {a} x {b} = {a * b}")
 
 #lancer de un ou plusieurs dès 
-@bot.tree.command(name="roll", description="Lance x dé à n faces")
-
 @bot.tree.command(name="roll", description="Lance x dés à n faces")
 async def roll(interaction: discord.Interaction, faces: int, nombre_de_des: int = 1):
     resultats = [random.randint(1, faces) for _ in range(nombre_de_des)]
@@ -70,6 +68,7 @@ if __name__ == "__main__":
         bot.run(token, log_handler=handler, log_level=logging.DEBUG)
     else:
         print("Erreur : Token introuvable.")
+
 
 
 webserver.keep_alive()
