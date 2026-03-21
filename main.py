@@ -10,7 +10,6 @@ import json
 import asyncio
 import time
 from collections import Counter
-import webserver
 # import webserver  # Décommenter si hébergé sur Replit
 #-------------------------------------------------------------------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------------------------------------------------------------------
@@ -27,7 +26,7 @@ import webserver
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
-handler = logging.FileHandler(filename='/data/discord.log', encoding='utf-8', mode='w')
+handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
 intents = discord.Intents.all()
 
 # --- IDs des Game Masters (doit être défini AVANT la création du bot) ---
@@ -69,7 +68,7 @@ PENDING_CLASHES = {}
 LAST_ATTACKER = {}  # {defender_user_id: attacker_user_id} — pour Distorsion Permanente
 
 def get_db_connection():
-    conn = sqlite3.connect('/data/frieren_jdr.db')
+    conn = sqlite3.connect('frieren_jdr.db')
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -269,7 +268,7 @@ def get_bonus_resonance(p) -> dict:
     if "passif_elem_surcharge" in p.competences:
         c = Counter(p.charges_elementaires)
         dominant, count = c.most_common(1)[0]
-        if count >= 3: bonus_sup += 2
+        if count >= 3 and all(e == dominant for e in p.charges_elementaires[:count]): bonus_sup += 2
     if "passif_elem_tempetes" in p.competences: bonus_sup += 3
 
     if avatar_actif:
@@ -293,7 +292,7 @@ def get_bonus_resonance(p) -> dict:
 
 def get_nb_alterations(cible: 'Personnage') -> int:
     """Retourne le nombre d'altérations d'état actives sur la cible (Sadisme Tactique)."""
-    alts = {"poison", "brulure", "hemorragie", "stun", "root", "gel", "corruption", "mutilation", "toxine", "silence"}
+    alts = {"poison", "brulure", "hemorragie", "stun", "root", "gel", "corruption", "mutilation"}
     return sum(1 for k in cible.effets if k in alts)
 
 def get_lestage(cible: 'Personnage') -> int:
@@ -364,8 +363,7 @@ def calculer_serment(p: 'Personnage', degats_subis: int):
     if p.pv_actuel <= seuil_30:
         p.serment_bonus = max_bas
     else:
-        gain = round(degats_subis / 5)
-        p.serment_bonus = min(max_bonus, p.serment_bonus + gain)
+        p.serment_bonus = min(max_bonus, round(degats_subis / 5))
 
 def appliquer_fureur_tribale(p: 'Personnage', pv_avant: int, degats: int) -> str:
     """Vérifie et applique la Fureur Tribale (passage sous 50% PV). Retourne message."""
@@ -586,7 +584,6 @@ def populate_spells():
         # ====================================================================================
 
         # --- PASSIFS ---
-        ("passif_sang_lame",       "[Lame Infectée] (Passif)",     '["magie_sang"]', 1, 1, 0,0,0,"esp",0,"mana",0,0, "TC : 25% chance d'infliger 1 Poison ou 1 Hémorragie.", "passif", "spe", '{"passif": "sang_lame"}'),
         ("passif_festin_stade1",  "[Festin Stade 1] (Passif)",   '["magie_sang"]', 1, 1, 0,0,0,"esp",0,"mana",0,0, "Tronc commun : +3 dégâts finaux (Stade 1+).", "passif", "spe", '{"passif": "festin_stade1"}'),
         ("passif_festin_stade2",  "[Festin Stade 2] (Passif)",   '["magie_sang"]', 2, 2, 0,0,0,"esp",0,"mana",0,0, "Tronc commun : +6 dégâts + Hémorragie auto (Stade 2+).", "passif", "spe", '{"passif": "festin_stade2"}'),
         ("passif_festin_stade3",  "[Festin Stade 3] (Passif)",   '["magie_sang"]', 3, 3, 0,0,0,"esp",0,"mana",0,0, "Sorts de sous-classe infligent leurs dégâts (Stade 3+).", "passif", "spe", '{"passif": "festin_stade3"}'),
@@ -596,7 +593,7 @@ def populate_spells():
         # --- PALLIER 1 ---
         ("sang_ciseaux_novice",   "Ciseaux de Sang Novice",       '["magie_sang"]', 1, 1, 4, 3, 2, "esp", 6, "mana", 0, 1,  "Projets deux lames de sang tranchantes.", "actif", "spe",   '{"generate_festin": 4, "no_dmg_unless_stade3": true, "seuil": 1, "status": {"hemorragie": 2}}'),
         ("sang_ombrelle_novice",  "Ombrelle Écarlate Novice (Bonus)", '["magie_sang"]', 1, 1, 0, 2, 2, "esp", 5, "mana", 0, 1, "Bouclier de sang cristallisé.", "defense", "spe", '{"generate_festin": 4, "seuil": 1, "reduce_dmg_flat": 5}'),
-        ("sang_siphon_novice",    "Siphon Aristocratique Novice", '["magie_sang"]', 1, 1, 3, 3, 2, "esp", 5, "mana", 0, 1,  "Aspire le sang de la cible pour se soigner.", "actif", "spe",  '{"generate_festin": 5, "no_dmg_unless_stade3": true, "seuil": 1, "lifesteal_flat": 8}'),
+        ("sang_siphon_novice",    "Siphon Aristocratique Novice", '["magie_sang"]', 1, 1, 3, 3, 2, "esp", 5, "mana", 0, 1,  "Aspire le sang de la cible pour se soigner.", "actif", "spe",  '{"generate_festin": 5, "no_dmg_unless_stade3": true, "seuil": 1, "lifesteal_flat": 4}'),
         ("sang_degustation",      "Dégustation (Bonus)",          '["magie_sang"]', 1, 1, 0, 1, 0, "esp", 4, "mana", 0, 0,  "Analyse l'essence vitale d'une cible.", "utilitaire", "spe",  '{"generate_festin": 4, "rp_effect": "Révèle la race, les afflictions actives et les PV approximatifs de la cible."}'),
         ("sang_parfum",           "Parfum d'Hémoglobine (Bonus)", '["magie_sang"]', 1, 1, 0, 1, 0, "esp", 3, "mana", 0, 0,  "Perçoit le sang à distance.", "utilitaire", "spe",  '{"generate_festin": 4, "rp_effect": "Localise toute créature vivante dans un rayon de 30m pendant 1 tour."}'),
 
@@ -611,12 +608,12 @@ def populate_spells():
         ("sang_ciseaux",          "Ciseaux de Sang",              '["magie_sang"]', 3, 3, 9, 4, 3, "esp", 12, "mana", 0, 1,  "Lames de sang renforcées par le Festin.", "actif", "spe",   '{"generate_festin": 7, "no_dmg_unless_stade3": true, "seuil": 1, "status": {"hemorragie": 3}}'),
         ("sang_ombrelle",         "Ombrelle Écarlate (Bonus)",    '["magie_sang"]', 3, 3, 0, 3, 3, "esp", 10, "mana", 0, 1,  "Bouclier de sang avancé avec contre-attaque.", "defense", "spe",  '{"generate_festin": 7, "seuil": 2, "reduce_dmg_flat": 10, "reflect_dmg_percent": 30}'),
         ("sang_siphon",           "Siphon Aristocratique",        '["magie_sang"]', 3, 3, 8, 4, 3, "esp", 12, "mana", 0, 1,  "Drain puissant qui nourrit abondamment.", "actif", "spe",    '{"generate_festin": 8, "no_dmg_unless_stade3": true, "seuil": 1, "lifesteal_flat": 10}'),
-        ("sang_banquet",          "Règles du Banquet (Bonus)",    '["magie_sang"]', 3, 3, 0, 2, 0, "esp", 10, "mana", 0, 2,  "Impose les règles de l'aristocratie vampirique.", "utilitaire", "spe",  '{"generate_festin": 7, "seuil": 1, "regle_banquet": true, "rp_effect": "Force une cible humanoïde à respecter une règle de conduite pendant 1 scène."}'),
+        ("sang_banquet",          "Règles du Banquet (Bonus)",    '["magie_sang"]', 3, 3, 0, 2, 0, "esp", 10, "mana", 0, 2,  "Impose les règles de l'aristocratie vampirique.", "utilitaire", "spe",  '{"generate_festin": 7, "rp_effect": "Force une cible humanoïde à respecter une règle de conduite pendant 1 scène."}'),
         ("sang_millesime",        "Millésime Écarlate (Bonus)",   '["magie_sang"]', 3, 3, 0, 2, 0, "esp", 8, "mana", 0, 1,  "Consomme du Festin pour soigner.", "soin", "spe",  '{"generate_festin": -5, "festin_heal": true}'),
 
         # --- PALLIER 4 ---
         ("sang_broderie",         "Broderie Macabre",             '["magie_sang"]', 4, 4, 13, 5, 3, "esp", 18, "mana", 0, 2,  "Les fils de sang transpercent et contorsionnent.", "actif", "spe",  '{"generate_festin": 8, "no_dmg_unless_stade3": true, "seuil": 2, "status": {"root": 2, "hemorragie": 2}}'),
-        ("sang_baiser",           "Baiser du Vampire",            '["magie_sang"]', 4, 4, 0, 4, 4, "esp", 16, "mana", 0, 2,  "Drain vampirique total : sang, mana et vitalité.", "actif", "spe",   '{"generate_festin": 9, "no_dmg_unless_stade3": true, "seuil": 2, "lifesteal_flat": 14, "drain_mana_cible": 10}'),
+        ("sang_baiser",           "Baiser du Vampire",            '["magie_sang"]', 4, 4, 0, 4, 4, "esp", 16, "mana", 0, 2,  "Drain vampirique total : sang, mana et vitalité.", "actif", "spe",   '{"generate_festin": 9, "no_dmg_unless_stade3": true, "seuil": 2, "lifesteal_flat": 14, "restore_mana": 5}'),
         ("sang_terreur",          "Aura de Terreur (Bonus)",      '["magie_sang"]', 4, 4, 0, 3, 0, "esp", 14, "mana", 0, 3,  "Rayonne une terreur aristocratique paralysante.", "utilitaire", "spe",  '{"generate_festin": 8, "seuil": 2, "rp_effect": "Applique la Peur à tous les ennemis humanoïdes dans 10m. Jet de résistance ou fuite."}'),
         ("sang_invitation",       "Invitation au Bal (Bonus)",    '["magie_sang"]', 4, 4, 0, 2, 0, "esp", 12, "mana", 0, 2,  "Attire irrésistiblement une cible vers soi.", "utilitaire", "spe",  '{"generate_festin": 7, "seuil": 1, "rp_effect": "Téléporte une cible consentante ou vaincue à 5m de soi."}'),
         ("sang_regard",           "Regard Hypnotique (Bonus)",    '["magie_sang"]', 4, 4, 0, 3, 0, "esp", 14, "mana", 0, 3,  "Plonge une cible dans une transe vampirique.", "utilitaire", "spe",  '{"generate_festin": 8, "seuil": 2, "rp_effect": "Contrôle une cible non-résistante pendant 1 tour (ordres simples)."}'),
@@ -758,47 +755,19 @@ def populate_spells():
         # ASSASSIN DE LA CONFRÉRIE — Sous-classe Guerrier
         # ====================================================================================
         # --- PASSIFS ---
-        # — PASSIFS —
-        ("passif_assassin_lame",    "[Lame Infectée] (Passif)",          '["assassin_confrerie"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "TC : 25% chance d\'infliger 1 Poison ou 1 Hémorragie.", "passif", "spe", '{"passif": "assassin_lame"}'),
-        ("passif_assassin_sadisme", "[Sadisme Tactique] (Passif)",       '["assassin_confrerie"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "+4/+8/+12 dégâts selon altérations. 3+ : Inesquivable.", "passif", "spe", '{"passif": "assassin_sadisme"}'),
-        ("passif_assassin_neuro",   "[Neurotoxine] (Passif)",            '["assassin_confrerie"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Cible sous Toxine : action Bonus bloquée.", "passif", "spe", '{"passif": "assassin_neuro"}'),
-        ("passif_assassin_traque",  "[Traque Silencieuse] (Passif)",     '["assassin_confrerie"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "2+ altérations : ignore Robustesse sur TC.", "passif", "spe", '{"passif": "assassin_traque"}'),
-        ("passif_assassin_bourreau","[Bourreau des Ombres] (Passif)",    '["assassin_confrerie"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "3+ altérations sur cible : coût TC réduit à 0.", "passif", "spe", '{"passif": "assassin_bourreau"}'),
-        ("passif_assassin_sang",    "[Sang-Froid] (Passif)",             '["assassin_confrerie"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "+1 Tension par altération active sur la cible (max +4).", "passif", "spe", '{"passif": "assassin_sang"}'),
-        ("passif_assassin_expert",  "[Expert en Souffrance] (Passif)",   '["assassin_confrerie"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "TC sur cible avec altérations : +1 durée sur toutes.", "passif", "spe", '{"passif": "assassin_expert"}'),
-        ("passif_assassin_heure",   "[L\'Heure du Crime] (Passif)",      '["assassin_confrerie"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "TC sur cible empoisonnée : ignore Armure + Robustesse.", "passif", "spe", '{"passif": "assassin_heure"}'),
-        ("passif_assassin_exe",     "[Exécution Chirurgicale] (Passif)", '["assassin_confrerie"]', 5, 5, 0,0,0,"phy",0,"tension",0,0, "Cible ≤25% PV + 3+ altérations : rappel exécution (manuel).", "passif", "spe", '{"passif": "assassin_exe"}'),
-        ("passif_assassin_ange",    "[L\'Ange Noir] (Passif)",           '["assassin_confrerie"]', 5, 5, 0,0,0,"phy",0,"tension",0,0, "Kill ennemi 3+ altérations → +5 Tension +15 PV (manuel).", "passif", "spe", '{"passif": "assassin_ange"}'),
-        # — SORTS P1 —
-        ("assassin_coup_vicieux_nov",  "Coup Vicieux Novice",          '["assassin_confrerie"]', 1, 1, 5, 3, 2, "phy", 1, "tension", 0, 0, "Si cible Hémorragie : ignore Armure.", "actif", "spe", '{"seuil": 2, "ignore_armor_si_hemo": true}'),
-        ("assassin_dague_nov",         "Dague Toxique Novice",         '["assassin_confrerie"]', 1, 1, 4, 3, 2, "phy", 1, "tension", 0, 1, "1 Toxine (Pièces -1 prochain tour).", "actif", "spe", '{"seuil": 2, "status": {"toxine": 1}}'),
-        ("assassin_bombe_nov",         "Bombe Fumigène Novice (Bonus)",'["assassin_confrerie"]', 1, 1, 0, 3, 2, "phy", 1, "tension", 0, 2, "Bouclier 8 + Furtif.", "defense", "spe", '{"seuil": 1, "reduce_dmg_flat": 8, "self_status": {"furtif": 1}}'),
-        ("assassin_pas_velours",       "Pas de Velours (Bonus)",       '["assassin_confrerie"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 0, "Déplacement silencieux.", "utilitaire", "spe", '{"rp_effect": "Déplacement ou infiltration sans bruit."}'),
-        ("assassin_analyse",           "Analyse des Failles (Bonus)",  '["assassin_confrerie"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 1, "Révèle la pire stat ennemie.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "MJ révèle la pire statistique de l\'ennemi."}'),
-        # — SORTS P2 —
-        ("assassin_frappe_arterielle_nov","Frappe Artérielle Novice",  '["assassin_confrerie"]', 2, 2, 6, 3, 2, "phy", 2, "tension", 0, 2, "2 Hémorragies.", "actif", "spe", '{"seuil": 2, "status": {"hemorragie": 2}}'),
-        ("assassin_couteaux_nov",      "Lancer de Couteaux Novice",    '["assassin_confrerie"]', 2, 2, 5, 4, 2, "phy", 2, "tension", 0, 1, "Touche 2 ennemis : 1 Poison chacun.", "actif", "spe", '{"seuil": 2, "status": {"poison": 1}, "aoe_reduit": true}'),
-        ("assassin_fausse_id",         "Fausse Identité (Bonus)",      '["assassin_confrerie"]', 2, 2, 0, 2, 0, "phy", 0, "tension", 0, 0, "Déguisement parfait.", "utilitaire", "spe", '{"rp_effect": "Se déguise parfaitement en un PNJ spécifique."}'),
-        ("assassin_crochet",           "Crochetage Expert (Bonus)",    '["assassin_confrerie"]', 2, 2, 0, 2, 0, "phy", 0, "tension", 0, 1, "Ouvre toute serrure non-magique.", "utilitaire", "spe", '{"rp_effect": "Ouvre instantanément et sans bruit toute serrure/coffre non-magique."}'),
-        ("assassin_somnifere",         "Somnifère Aérien (Bonus)",     '["assassin_confrerie"]', 2, 2, 0, 2, 0, "phy", 0, "tension", 0, 1, "Endort un PNJ 1h.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Endort instantanément un PNJ non-combattant pendant 1 heure."}'),
-        # — SORTS P3 —
-        ("assassin_coup_vicieux",      "Coup Vicieux",                 '["assassin_confrerie"]', 3, 3, 8, 3, 3, "phy", 3, "tension", 0, 0, "2 Hémorragies + Mutilation.", "actif", "spe", '{"seuil": 2, "status": {"hemorragie": 2, "mutilation": 1}}'),
-        ("assassin_dague",             "Dague Toxique",                '["assassin_confrerie"]', 3, 3, 6, 4, 3, "phy", 3, "tension", 0, 1, "2 Toxines + Silence.", "actif", "spe", '{"seuil": 3, "status": {"toxine": 2, "silence": 1}}'),
-        ("assassin_bombe",             "Bombe Fumigène (Bonus)",       '["assassin_confrerie"]', 3, 3, 0, 4, 3, "phy", 2, "tension", 0, 2, "Bouclier 12 + équipe Furtive.", "defense", "spe", '{"seuil": 2, "reduce_dmg_flat": 12, "self_status": {"furtif": 1}}'),
-        ("assassin_voix_ombre",        "Voix de l\'Ombre (Bonus)",     '["assassin_confrerie"]', 3, 3, 0, 3, 0, "phy", 0, "tension", 0, 1, "Imite parfaitement une voix.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Imite parfaitement la voix d\'un PNJ entendu."}'),
-        ("assassin_poison_pers",       "Poison Persistant (Bonus)",    '["assassin_confrerie"]', 3, 3, 0, 3, 0, "phy", 0, "tension", 0, 1, "Empoisonne un plat.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Empoisonne indétectablement un plat/boisson (mortel pour PNJ mineur)."}'),
-        # — SORTS P4 —
-        ("assassin_frappe_arterielle", "Frappe Artérielle",            '["assassin_confrerie"]', 4, 4, 10, 4, 3, "phy", 4, "tension", 0, 2, "3 Hémorragies + saignement actif.", "actif", "spe", '{"seuil": 3, "status": {"hemorragie": 3}, "saignement_actif": 5}'),
-        ("assassin_couteaux",          "Lancer de Couteaux",           '["assassin_confrerie"]', 4, 4, 8, 5, 3, "phy", 4, "tension", 0, 1, "Zone : 1 Poison + 1 Toxine sur tous.", "actif", "spe", '{"seuil": 3, "status": {"poison": 1, "toxine": 1}, "aoe": true}'),
-        ("assassin_marque_peur",       "Marque de Peur (Bonus)",       '["assassin_confrerie"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 1, "Symbole de menace.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Gravez un symbole — quiconque le voit obéit sans combattre."}'),
-        ("assassin_poudre_amnesie",    "Poudre d\'Amnésie (Bonus)",    '["assassin_confrerie"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 1, "Efface 10min de mémoire.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Efface les 10 dernières minutes de mémoire d\'un PNJ."}'),
-        ("assassin_langage",           "Langage Silencieux (Bonus)",   '["assassin_confrerie"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 1, "Communication invisible.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Communication par signes codés imperceptibles aux non-initiés."}'),
-        # — SORTS P5 —
-        ("assassin_coup_vicieux_avance","Coup Vicieux Avancé",         '["assassin_confrerie"]', 5, 5, 15, 4, 4, "phy", 5, "tension", 0, 0, "Dégâts massifs. <20% PV : rappel exécution.", "actif", "spe", '{"seuil": 3, "execute_if_below_20": true}'),
-        ("assassin_dague_avance",      "Dague Toxique Avancée",        '["assassin_confrerie"]', 5, 5, 12, 5, 4, "phy", 5, "tension", 0, 1, "4 Toxines.", "actif", "spe", '{"seuil": 4, "status": {"toxine": 4}}'),
-        ("assassin_bombe_avance",      "Bombe Fumigène Avancée (Bonus)",'["assassin_confrerie"]',5, 5, 0, 5, 4, "phy", 4, "tension", 0, 3, "Invulnérabilité équipe ce tour.", "defense", "spe", '{"seuil": 3, "aoe_invulnerabilite": true}'),
-        ("assassin_ecoute",            "Écoute Ténébreuse (Bonus)",    '["assassin_confrerie"]', 5, 5, 0, 4, 0, "phy", 0, "tension", 0, 2, "Entend à travers les murs.", "utilitaire", "spe", '{"seuil": 2, "rp_effect": "Entend parfaitement à travers les murs via les ombres."}'),
-        ("assassin_contrat",           "Contrat Absolu (Bonus)",       '["assassin_confrerie"]', 5, 5, 0, 6, 0, "phy", 0, "tension", 0, 5, "Assassinat PNJ en 24h.", "utilitaire", "spe", '{"seuil": 4, "rp_effect": "Assassinat d\'un PNJ non-combattant dans les 24h sans trace (MJ valide)."}')
+        ("passif_assassin_sadisme","[Sadisme Tactique] (Passif)", '["assassin_confrerie"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "+4/+8/+12 dégâts selon nombre d\'altérations sur la cible.", "passif", "spe", '{"passif": "assassin_sadisme"}'),
+        ("passif_assassin_traque", "[Traque Silencieuse] (Passif)",'["assassin_confrerie"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Cible Désignée ou avec 2+ altérations : ignore Robustesse.", "passif", "spe", '{"passif": "assassin_traque"}'),
+        ("passif_assassin_sang",   "[Sang-Froid] (Passif)",       '["assassin_confrerie"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "+1 Tension par altération active sur la cible (max +4).", "passif", "spe", '{"passif": "assassin_sang"}'),
+        ("passif_assassin_expert", "[Expert en Souffrance] (Passif)",'["assassin_confrerie"]',4, 4, 0,0,0,"phy",0,"tension",0,0, "Chaque attaque TC sur cible avec altérations : +1 durée sur toutes ses altérations.", "passif", "spe", '{"passif": "assassin_expert"}'),
+        ("passif_assassin_heure",  "[L'Heure du Crime] (Passif)",   '["assassin_confrerie"]',4, 4, 0,0,0,"phy",0,"tension",0,0, "Sorts TC sur cible empoisonnée : ignore Armure + Robustesse.", "passif", "spe", '{"passif": "assassin_heure"}'),
+        ("passif_assassin_exe",    "[Exécution Chirurgicale] (Passif)",'["assassin_confrerie"]',5,5,0,0,0,"phy",0,"tension",0,0,"Cible ≤25% PV avec 3+ altérations : exécution automatique.", "passif", "spe", '{"passif": "assassin_exe"}'),
+        # --- ACTIFS ---
+        ("assassin_frappe_nov",   "Frappe Empoisonnée Novice",    '["assassin_confrerie"]', 1, 1, 5, 3, 2, "phy", 2, "tension", 0, 1, "Attaque rapide infligeant Poison.", "actif", "spe", '{"seuil": 2, "status": {"poison": 2}}'),
+        ("assassin_laceration",   "Lacération",                   '["assassin_confrerie"]', 2, 2, 6, 4, 2, "phy", 3, "tension", 0, 1, "Déchire chair et moral. Hémorragie + Poison.", "actif", "spe", '{"seuil": 2, "status": {"hemorragie": 2, "poison": 1}}'),
+        ("assassin_venin_avance",  "Venin Avancé",                '["assassin_confrerie"]', 3, 3, 8, 4, 3, "phy", 4, "tension", 0, 2, "Poison puissant doublant ses effets.", "actif", "spe", '{"seuil": 2, "status": {"poison": 3}, "double_dot_si_poison": true}'),
+        ("assassin_torture",       "Torture Méthodique",          '["assassin_confrerie"]', 4, 4, 9, 5, 3, "phy", 5, "tension", 0, 2, "Inflige Brûlure + Poison + Hémorragie simultanément.", "actif", "spe", '{"seuil": 3, "status": {"brulure": 2, "poison": 2, "hemorragie": 2}}'),
+        ("assassin_mise_a_mort",   "Mise à Mort",                 '["assassin_confrerie"]', 5, 5, 14, 6, 5, "phy", 6, "tension", 0, 3, "Frappe finale. Si cible 3+ altérations : ignore toute défense.", "actif", "spe", '{"seuil": 4, "ignore_armor_si_3alt": true, "ignore_rob_si_3alt": true}'),
+
         # ====================================================================================
         # ÉCOLE DE L'ESTOC — Sous-classe Guerrier
         # ====================================================================================
@@ -851,7 +820,7 @@ def populate_spells():
         # P1
         ("nord_coup_tete_novice", "Coup de Tête Novice",           '["clan_nord"]', 1, 1, 4, 3, 2, "phy", 1, "tension", 0, 1, "Impact frontal surprenant.", "actif", "spe", '{"seuil": 2, "status": {"stun": 1}, "bonus_si_serment_degats": {"tension_bonus": 1}}'),
         ("nord_rugissement_novice","Rugissement Novice",           '["clan_nord"]', 1, 1, 3, 3, 1, "phy", 1, "tension", 0, 1, "Cri de guerre vacillant la résolution.", "actif", "spe", '{"seuil": 2, "status": {"hemorragie": 2}}'),
-        ("nord_briseur_novice",   "Briseur d'Os Novice",           '["clan_nord"]', 1, 1, 4, 3, 2, "phy", 1, "tension", 0, 1, "Vise les articulations pour affaiblir.", "actif", "spe", '{"seuil": 2, "malus_base_cible": 3, "rp_effect": "Réduit Base prochaine attaque cible de 3. Dure 1 tour."}'),
+        ("nord_briseur_novice",   "Briseur d'Os Novice",           '["clan_nord"]', 1, 1, 4, 3, 2, "phy", 1, "tension", 0, 1, "Vise les articulations pour affaiblir.", "actif", "spe", '{"seuil": 2, "rp_effect": "Réduit Base prochaine attaque cible de 3. Dure 1 tour."}'),
         ("nord_cracher",          "Cracher le Sang (Bonus)",       '["clan_nord"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 1, "Retire 1 stack Poison ou Brûlure.", "utilitaire", "spe", '{"seuil": 1, "cleanse_self_dot": 1, "rp_effect": "Retire 1 stack Poison ou Brûlure. Intimide PNJ qui vous a vu blessé."}'),
         ("nord_resistance",       "Résistance Tribale (Bonus)",    '["clan_nord"]', 1, 1, 0, 1, 0, "phy", 0, "tension", 0, 0, "Immunité froid, faim, épuisement.", "utilitaire", "spe", '{"rp_effect": "Immunisé aux malus environnementaux : froid extrême, faim, épuisement ordinaire."}'),
         # P2
@@ -963,42 +932,18 @@ def populate_spells():
         # ORDRE HOSPITALIER — Sous-classe Prêtre
         # ====================================================================================
         # --- PASSIFS ---
-        # — PASSIFS —
-        ("passif_hosp_vigilance",  "[Vigilance du Martyr] (Passif)", '["ordre_hospitalier"]', 1, 1, 0,0,0,"foi",0,"ferveur",0,0, "+10 PV Max. Aura: +1 Verset par transfert si >20% PV.", "passif", "spe", '{"passif": "hosp_vigilance", "pv_bonus": 10}'),
-        ("passif_hosp_foi",        "[Foi Inébranlable] (Passif)",    '["ordre_hospitalier"]', 2, 2, 0,0,0,"foi",0,"ferveur",0,0, "Dégâts Aura plancher 1 PV. Aura coupe à 1 PV.", "passif", "spe", '{"passif": "hosp_foi"}'),
-        ("passif_hosp_martyre",    "[Martyre Éclatant] (Passif)",    '["ordre_hospitalier"]', 3, 3, 0,0,0,"foi",0,"ferveur",0,0, "Aura active: soins TC coutent 50% moins cher.", "passif", "spe", '{"passif": "hosp_martyre"}'),
-        ("passif_hosp_sang",       "[Sang des Saints] (Passif)",     '["ordre_hospitalier"]', 4, 4, 0,0,0,"foi",0,"ferveur",0,0, "Immunisé Poison. Poison allié dans Aura vient sur vous.", "passif", "spe", '{"passif": "hosp_sang"}'),
-        ("passif_hosp_ascension",  "[L'Ascension] (Passif)",         '["ordre_hospitalier"]', 5, 5, 0,0,0,"foi",0,"ferveur",0,0, "A 1 PV: Aura gratuite + reduit -10 degats allies.", "passif", "spe", '{"passif": "hosp_ascension"}'),
-        # — SORTS P1 —
-        ("hosp_suture_nov",        "Suture de Lumiere Novice",       '["ordre_hospitalier"]', 1, 1, 5, 3, 2, "foi", 12, "ferveur", 0, 1, "Soigne 8 PV. Si Aura: soin partage 2 allies.", "soin", "spe", '{"seuil": 2, "soin_cible": 8, "partage_si_aura": true}'),
-        ("hosp_aura_sacrifice",    "Aura de Sacrifice (Bonus)",      '["ordre_hospitalier"]', 1, 1, 0, 0, 0, "foi", 5, "ferveur", 0, 0, "Active ou desactive lAura.", "utilitaire", "spe", '{"toggle_aura": true}'),
-        ("hosp_don_soi_nov",       "Don de Soi Novice",              '["ordre_hospitalier"]', 1, 1, 5, 2, 2, "foi", 10, "ferveur", 1, 2, "Retire 1 Poison/Hemorragie allie vers vous. Allie +6 PV.", "soin", "spe", '{"seuil": 2, "don_soi_novice": true}'),
-        ("hosp_diagnostic",        "Diagnostic Celeste (Bonus)",     '["ordre_hospitalier"]', 1, 1, 0, 2, 0, "foi", 5, "ferveur", 0, 0, "Identifie cause maladie.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Identifie la cause exacte dune maladie ou blessure, meme magique."}'),
-        ("hosp_serenite",          "Serenite (Bonus)",               '["ordre_hospitalier"]', 1, 1, 0, 2, 0, "foi", 5, "ferveur", 0, 1, "Calme panique ou rage.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Calme immediatement une panique ou une rage."}'),
-        # — SORTS P2 —
-        ("hosp_lien_vie_nov",      "Lien de Vie Novice",             '["ordre_hospitalier"]', 2, 2, 7, 3, 2, "foi", 15, "ferveur", 2, 2, "Designe allie: 50% degats vous. +1 Verset/transfert.", "defense", "spe", '{"seuil": 2, "lien_de_vie": 50}'),
-        ("hosp_onde_purge_nov",    "Onde de Purge Novice",           '["ordre_hospitalier"]', 2, 2, 6, 3, 2, "foi", 20, "ferveur", 0, 2, "Zone: 1 malus dissipe equipe. +3 PV par allie purge.", "soin", "spe", '{"seuil": 3, "onde_purge": 1}'),
-        ("hosp_priere",            "Priere de Soulagement (Bonus)",  '["ordre_hospitalier"]', 2, 2, 5, 3, 2, "foi", 10, "ferveur", 1, 2, "Soigne 10 PV allie.", "soin", "spe", '{"seuil": 2, "soin_cible": 10}'),
-        ("hosp_veillee",           "Veillee Funebre (Bonus)",        '["ordre_hospitalier"]', 2, 2, 0, 2, 0, "foi", 5, "ferveur", 0, 1, "Apaise mourant.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Apaise un mourant pour ses dernieres volontes."}'),
-        ("hosp_asperges",          "Asperges (Bonus)",               '["ordre_hospitalier"]', 2, 2, 0, 2, 0, "foi", 8, "ferveur", 0, 1, "Revele magie noire/sang cache.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Revele traces de magie noire ou sang cache via eau benite."}'),
-        # — SORTS P3 —
-        ("hosp_suture",            "Suture de Lumiere",              '["ordre_hospitalier"]', 3, 3, 10, 4, 3, "foi", 15, "ferveur", 1, 1, "Soigne 15 PV. Si Aura: supprime Hemorragie.", "soin", "spe", '{"seuil": 2, "soin_cible": 15, "cleanse_hemo_si_aura": true}'),
-        ("hosp_rempart_nov",       "Rempart de Foi (Bonus)",         '["ordre_hospitalier"]', 3, 3, 10, 4, 2, "foi", 20, "ferveur", 2, 2, "Bouclier 18 sur allie.", "defense", "spe", '{"seuil": 3, "armure_allie": 18}'),
-        ("hosp_don_soi",           "Don de Soi",                     '["ordre_hospitalier"]', 3, 3, 10, 3, 3, "foi", 15, "ferveur", 2, 2, "Perd 10 PV. Allie: +25 PV +10 Ferveur.", "soin", "spe", '{"seuil": 3, "don_soi": true}'),
-        ("hosp_sanctuaire_olf",    "Sanctuaire Olfactif (Bonus)",    '["ordre_hospitalier"]', 3, 3, 0, 3, 0, "foi", 10, "ferveur", 0, 1, "Annule odeurs mort/gaz toxiques.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Annule les odeurs de mort et gaz toxiques dans 10m."}'),
-        ("hosp_parole",            "Parole de Confort (Bonus)",      '["ordre_hospitalier"]', 3, 3, 0, 3, 0, "foi", 10, "ferveur", 0, 1, "Retire traumatisme ou peur.", "utilitaire", "spe", '{"seuil": 2, "rp_effect": "Retire un traumatisme psychique ou une peur panique."}'),
-        # — SORTS P4 —
-        ("hosp_lien_vie",          "Lien de Vie",                    '["ordre_hospitalier"]', 4, 4, 15, 4, 3, "foi", 25, "ferveur", 4, 2, "Lie 2 allies: partagent soins. +1 Verset si attaque.", "defense", "spe", '{"seuil": 3, "lien_de_vie": 50, "lien_double": true}'),
-        ("hosp_onde_purge",        "Onde de Purge",                  '["ordre_hospitalier"]', 4, 4, 12, 5, 3, "foi", 30, "ferveur", 3, 3, "Dissipe TOUS malus equipe + degats zone ennemis.", "actif", "spe", '{"seuil": 3, "onde_purge": 0, "aoe": true}'),
-        ("hosp_exorcisme",         "Exorcisme de la Chair (Bonus)",  '["ordre_hospitalier"]', 4, 4, 0, 3, 0, "foi", 15, "ferveur", 2, 2, "Guerit maladies non-magiques.", "utilitaire", "spe", '{"seuil": 3, "rp_effect": "Guerit tous les maux qui ne proviennent pas de la magie."}'),
-        ("hosp_humilite",          "Aura d'Humilite (Bonus)",        '["ordre_hospitalier"]', 4, 4, 0, 3, 0, "foi", 15, "ferveur", 1, 1, "Ennemis non-boss refusent dattaquer en premier.", "utilitaire", "spe", '{"seuil": 2, "rp_effect": "Les ennemis non-boss refusent de vous attaquer en premier."}'),
-        ("hosp_eclat",             "Eclat de Martyr (Bonus)",        '["ordre_hospitalier"]', 4, 4, 5, 4, 3, "foi", 15, "ferveur", 2, 2, "Soigne equipe 10 PV + Stun ennemis.", "soin", "spe", '{"seuil": 2, "soin_aoe_allie": 10, "status": {"stun": 1}}'),
-        # — SORTS P5 —
-        ("hosp_suture_avance",     "Suture de Lumiere Avancee",      '["ordre_hospitalier"]', 5, 5, 20, 5, 4, "foi", 40, "ferveur", 5, 2, "Soigne 35 PV. Ressuscite allie mort ce tour (5 PV).", "soin", "spe", '{"seuil": 4, "soin_cible": 35, "resurrection_si_mort": true}'),
-        ("hosp_rempart_avance",    "Rempart de Foi Avance (Bonus)",  '["ordre_hospitalier"]', 5, 5, 15, 5, 4, "foi", 35, "ferveur", 5, 3, "Allie Invulnerable 1 tour. Degats evites → Ferveur.", "defense", "spe", '{"seuil": 3, "invulnerabilite_allie": true, "ferveur_si_bloque": true}'),
-        ("hosp_miracle",           "Miracle de la Confrerie",        '["ordre_hospitalier"]', 5, 5, 18, 4, 5, "foi", 50, "ferveur", 5, 3, "Soigne equipe 30 PV + purge tous malus.", "soin", "spe", '{"seuil": 3, "soin_aoe_allie": 30, "onde_purge": 0}'),
-        ("hosp_veracite",          "Veracite du Sang (Bonus)",       '["ordre_hospitalier"]', 5, 5, 0, 4, 0, "foi", 15, "ferveur", 2, 2, "Voit derniers moments dun defunt.", "utilitaire", "spe", '{"seuil": 3, "rp_effect": "Voit les derniers moments dun defunt."}'),
-        ("hosp_confession",        "Confession Finale (Bonus)",      '["ordre_hospitalier"]', 5, 5, 0, 6, 0, "foi", 60, "ferveur", 8, 5, "Tous ennemis: Stun 3 tours.", "actif", "spe", '{"seuil": 4, "aoe": true, "status": {"stun": 3}}')
+        ("passif_hosp_aura",      "[Aura de Sacrifice] (Passif)", '["ordre_hospitalier"]', 1, 1, 0,0,0,"foi",0,"ferveur",0,0, "Chaque attaque sur un allié : 3 dégâts transférés à l'Hospitalier.", "passif", "spe", '{"passif": "hosp_aura"}'),
+        ("hosp_aura_sacrifice",   "Aura de Sacrifice (Bonus)",    '["ordre_hospitalier"]', 1, 1, 0, 0, 0, "foi", 5, "ferveur", 0, 0, "Active ou désactive l'Aura de Sacrifice.", "utilitaire", "spe", '{"toggle_aura": true}'),
+        ("passif_hosp_resilience","[Résilience Sacrée] (Passif)", '["ordre_hospitalier"]', 2, 2, 0,0,0,"foi",0,"ferveur",0,0, "+2 Robustesse permanente.", "passif", "spe", '{"passif": "hosp_resilience"}'),
+        ("passif_hosp_intercession","[Intercession] (Passif)",  '["ordre_hospitalier"]', 3, 3, 0,0,0,"foi",0,"ferveur",0,0, "Une fois par combat, absorbe totalité d'une attaque alliée (aucun dégât pour l'allié).", "passif", "spe", '{"passif": "hosp_intercession"}'),
+        ("passif_hosp_martyr",    "[Martyr Vivant] (Passif)",    '["ordre_hospitalier"]', 4, 4, 0,0,0,"foi",0,"ferveur",0,0, "Sous 25% PV : Aura transfère 6 dégâts au lieu de 3.", "passif", "spe", '{"passif": "hosp_martyr"}'),
+        ("passif_hosp_redemption","[Rédemption] (Passif)",       '["ordre_hospitalier"]', 5, 5, 0,0,0,"foi",0,"ferveur",0,0, "Mort de l'Hospitalier soigne tous les alliés de 20 PV.", "passif", "spe", '{"passif": "hosp_redemption"}'),
+        # --- ACTIFS ---
+        ("hosp_imposition",       "Imposition des Mains",        '["ordre_hospitalier"]', 1, 1, 8, 3, 2, "foi", 15, "ferveur", 0, 1, "Soin ciblé. L'Hospitalier subit 2 dégâts.", "soin", "spe", '{"seuil": 1, "soin_cible": 10, "self_dmg": 2}'),
+        ("hosp_bouclier_sacre",   "Bouclier Sacré",               '["ordre_hospitalier"]', 2, 2, 6, 3, 2, "foi", 20, "ferveur", 0, 2, "Pose état Armure 3 sur un allié.", "soin", "spe", '{"seuil": 2, "self_status": {"armure": 3}, "cible_allie": true}'),
+        ("hosp_purification",     "Purification Sacrificielle",  '["ordre_hospitalier"]', 3, 3, 9, 4, 3, "foi", 25, "ferveur", 0, 2, "Dissipe toutes les altérations d'un allié. L'Hospitalier en absorbe la moitié.", "soin", "spe", '{"seuil": 2, "cleanse_cible_allie": true, "self_dmg_half_alts": true}'),
+        ("hosp_sanctuaire",       "Sanctuaire",                  '["ordre_hospitalier"]', 4, 4, 12, 5, 4, "foi", 35, "ferveur", 0, 3, "Zone de protection : tous les alliés ignorent prochains 5 dégâts.", "soin", "spe", '{"seuil": 3, "armure_allie_aoe": 5}'),
+        ("hosp_sacrifice_absolu",  "Sacrifice Absolu",            '["ordre_hospitalier"]', 5, 5, 0, 6, 0, "foi", 50, "ferveur", 0, 5, "L'Hospitalier tombe à 1 PV. Tous les alliés régénèrent 40% de leurs PV max.", "soin", "spe", '{"seuil": 4, "sacrifice_absolu": true}'),
 
         # ====================================================================================
         # ORACLE — Sous-classe Prêtre
@@ -1012,7 +957,7 @@ def populate_spells():
         # P1
         ("oracle_entrave_novice", "Entrave du Destin Novice",      '["oracle"]', 1, 1, 3, 3, 2, "foi", 10, "ferveur", 0, 1, "Freine le mouvement d'un être.", "actif", "spe", '{"seuil": 2, "status": {"root": 1}}'),
         ("oracle_touche_novice",  "Touche du Destin Novice",       '["oracle"]', 1, 1, 0, 3, 0, "foi", 12, "ferveur", 0, 2, "Réduit Base prochain sort cible de Foi÷2.", "actif", "spe", '{"seuil": 2, "reduce_base_cible": "foi_half", "bonus_si_presage_exact": {"reduce_bonus_pieces": 2}}'),
-        ("oracle_vision",         "Vision du Prochain Pas (Bonus)",'["oracle"]', 1, 1, 0, 2, 0, "foi", 8, "ferveur", 0, 1, "Une fois/combat : Présage auto exact.", "utilitaire", "spe", '{"seuil": 1, "presage_auto_exact": true, "rp_effect": "Une fois/combat : Présage de ce tour compte comme exact automatiquement."}'),
+        ("oracle_vision",         "Vision du Prochain Pas (Bonus)",'["oracle"]', 1, 1, 0, 2, 0, "foi", 8, "ferveur", 0, 1, "Une fois/combat : Présage auto exact.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Une fois/combat : Présage de ce tour compte comme exact automatiquement."}'),
         ("oracle_proba",          "Lecture des Probabilités (Bonus)",'["oracle"]', 1, 1, 0, 2, 0, "foi", 5, "ferveur", 0, 0, "Probabilités favorables/défavorables/neutres.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Avant action risquée : MJ indique probabilités (favorables/défavorables/neutres)."}'),
         ("oracle_encens",         "Encens Oraculaire (Bonus)",     '["oracle"]', 1, 1, 0, 1, 0, "foi", 5, "ferveur", 0, 0, "Prochain Présage RP 90% fiable.", "utilitaire", "spe", '{"rp_effect": "En brûlant 10min encens hors combat : prochain Présage RP fiable à 90%."}'),
         # P2
@@ -1237,8 +1182,6 @@ class Personnage:
             self.pv_max += 4
         if "passif_lotus_discipline" in self.competences:
             self.pv_max += 5
-        if "passif_hosp_vigilance" in self.competences:
-            self.pv_max += 10
 
     def get_bonus_niveau(self):
         return self.niveau // 5
@@ -1591,15 +1534,11 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
     try: data = json.loads(data_json)
     except (json.JSONDecodeError, ValueError): return degats_actuels, ""
 
+    # --- 1. VÉRIFICATION DU SEUIL ---
     seuil_requis = data.get("seuil", 0)
-    _tisserand = bool(attaquant.effets.get("_tisserand_actif"))
-    _inevitable = bool(attaquant.effets.get("_inevitable_actif"))
     if seuil_requis > 0:
         if heads < seuil_requis:
-            if _tisserand or _inevitable:
-                msg.append(f"🔮 Seuil {seuil_requis} non atteint — effets statut garantis (Tisserand/Inévitable) !")
-            else:
-                return degats_actuels, f"*Seuil {seuil_requis} non atteint ({heads} 🟡). Effet annulé.*"
+            return degats_actuels, f"*Seuil {seuil_requis} non atteint ({heads} 🟡). Effet annulé.*"
         else: msg.append(f"✅ **Seuil {seuil_requis} atteint !**")
 
     degats_finaux = degats_actuels
@@ -1670,12 +1609,20 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         attaquant.ajouter_effet("bouclier", 1, data["reduce_dmg_flat"])
         msg.append(f"🛡️ **Protection** : -{data['reduce_dmg_flat']} dégâts.")
     elif "armure_base" in data:
+        # Posture du Lotus : armure conditionnelle selon état Concentré/Perturbé
+        attaquant.effets["posture_lotus_active"] = {
+            "duree": 1, "valeur": 1,
+            "armure_base": data["armure_base"],
+            "armure_concentre": data.get("armure_concentre", data["armure_base"]),
+            "armure_perturbe": data.get("armure_perturbe", data["armure_base"])
+        }
         if attaquant.concentre:
-            val_aff = data.get("armure_concentre", data["armure_base"]); label = "Concentré"
+            val_aff = data.get("armure_concentre", data["armure_base"])
+            label = "Concentré"
         else:
-            val_aff = data.get("armure_perturbe", data["armure_base"]); label = "Perturbé"
-        attaquant.ajouter_effet("bouclier", 1, val_aff)
-        msg.append(f"🌸 **Posture du Lotus ({label})** : -{val_aff} dégâts !")
+            val_aff = data.get("armure_perturbe", data["armure_base"])
+            label = "Perturbé"
+        msg.append(f"🌸 **Posture du Lotus ({label})** : -{val_aff} dégâts au prochain impact !")
 
     # ==========================================
     # --- 9. NOUVEAUTÉS : SANG & GUERRIER ---
@@ -1811,12 +1758,10 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
             attaquant.festin = max(0, attaquant.festin + gain)
             msg.append(f"🩸 **Festin** consommé : {attaquant.festin} restant.")
 
+    # Sorts de sous-classe sans dégâts tant que Stade 3 non atteint
     if data.get("no_dmg_unless_stade3") and get_festin_stade(attaquant) < 3:
         degats_finaux = 0
-        msg.append(f"*🩸 Stade {get_festin_stade(attaquant)} insuffisant — Stade 3 requis.*")
-    if data.get("no_dmg_unless_stade3") and get_festin_stade(attaquant) == 4 and degats_finaux > 0:
-        degats_finaux *= 2
-        msg.append(f"🩸⭐ **Stade 4** : Dégâts doublés → {degats_finaux} !")
+        msg.append(f"*🩸 Stade {get_festin_stade(attaquant)} insuffisant — Aucun dégât (Stade 3 requis pour infliger des dégâts).*")
 
     # Soin basé sur le Festin (Millésime Écarlate)
     if data.get("festin_heal") and attaquant.classe == "mage":
@@ -2044,23 +1989,31 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         degats_finaux += bonus_bp
         msg.append(f"🛡️ **Posture** : +{bonus_bp} Base (Ancrage Défensif) !")
 
-    # -- LÉGION : armure (Rempart + Bastion) — UN SEUL bouclier --
-    if "armure_si_posture" in data or "duree_armure" in data:
-        _val_arm = data["armure_si_posture"] if ("armure_si_posture" in data and attaquant.posture_active) else data.get("reduce_dmg_flat", 0)
-        _dur_arm = data.get("duree_armure", 1)
-        if _val_arm > 0:
-            attaquant.ajouter_effet("bouclier", _dur_arm, _val_arm)
-            msg.append(f"🛡️ {'Bastion' if 'duree_armure' in data else 'Posture'} : Armure {_val_arm}{f' ({_dur_arm} tours)' if 'duree_armure' in data else ''} !")
+    # -- LÉGION : armure bonus si Posture active --
+    if "armure_si_posture" in data and attaquant.posture_active:
+        bonus_arm = data["armure_si_posture"]
+        attaquant.ajouter_effet("bouclier", 1, bonus_arm)
+        msg.append(f"🛡️ **Posture** : Armure {bonus_arm} (au lieu de {data.get('reduce_dmg_flat', 0)}) !")
 
-    # -- LÉGION : reduction_fixe + bonus Posture additionnés --
-    _red_fixe_total = 0
-    if "reduction_fixe" in data: _red_fixe_total += data["reduction_fixe"]
-    if "reduction_bonus_si_posture" in data and attaquant.posture_active: _red_fixe_total += data["reduction_bonus_si_posture"]
-    if _red_fixe_total > 0:
-        _dur_red = data.get("duree_armure", 1)
-        attaquant.ajouter_effet("reduction_fixe_posture", _dur_red, _red_fixe_total)
-        _tag_pos = " (Posture)" if ("reduction_bonus_si_posture" in data and attaquant.posture_active) else ""
-        msg.append(f"🛡️ **Bastion** : -{_red_fixe_total} dégâts fixes{_tag_pos} !")
+    # -- LÉGION : durée armure multi-tours (Bastion) --
+    if "duree_armure" in data and data.get("reduce_dmg_flat", 0) > 0:
+        duree_arm = data["duree_armure"]
+        val_arm = data["armure_si_posture"] if ("armure_si_posture" in data and attaquant.posture_active) else data["reduce_dmg_flat"]
+        # Override le bouclier posé par reduce_dmg_flat avec la bonne durée
+        attaquant.ajouter_effet("bouclier", duree_arm, val_arm)
+        msg.append(f"🛡️ **Bastion** : Armure {val_arm} pendant {duree_arm} tours !")
+
+    # -- LÉGION : réduction fixe bonus en Posture (Bastion Novice/Avancé) --
+    if "reduction_bonus_si_posture" in data and attaquant.posture_active:
+        red_pos = data["reduction_bonus_si_posture"]
+        # Pose un bouclier fixe supplémentaire
+        attaquant.ajouter_effet("reduction_fixe_posture", 1, red_pos)
+        msg.append(f"🛡️ **Posture Défensive** : -{red_pos} dégâts supplémentaires !")
+
+    # -- LÉGION : réduction fixe générale (Bastion Avancé) --
+    if "reduction_fixe" in data and "reduction_bonus_si_posture" not in data:
+        attaquant.ajouter_effet("reduction_fixe_posture", 1, data["reduction_fixe"])
+        msg.append(f"🛡️ **Bastion** : -{data['reduction_fixe']} dégâts (fixe) !")
 
     # -- LÉGION : status_si_posture (Zone de Contrôle Avancée P4) --
     if "status_si_posture" in data and attaquant.posture_active and defenseur:
@@ -2079,9 +2032,9 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         msg.append(f"🛡️ **Rempart** : Tout dégât bloqué renvoie {data['rebond_si_bloque']} dégâts en retour !")
 
     # -- CLAN DU NORD : bonus si Serment + cible <30% PV --
-    if "bonus_si_serment_30pct" in data and attaquant.serment_actif:
-        seuil_s = int(attaquant.pv_max * 0.30)
-        if attaquant.pv_actuel <= seuil_s:
+    if "bonus_si_serment_30pct" in data and attaquant.serment_actif and defenseur:
+        seuil_s = int(defenseur.pv_max * 0.30)
+        if defenseur.pv_actuel <= seuil_s:
             b_s = data["bonus_si_serment_30pct"]
             if "status" in b_s:
                 for ec, ev in b_s["status"].items():
@@ -2154,28 +2107,6 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
             attaquant.effets["_kill_relancer_dispo"] = {"duree": 1, "valeur": 1}
             msg.append(f"🩸⚡ **Déchaînement** : {getattr(defenseur, 'nom', 'cible')} est à terre ! Vous pouvez immédiatement relancer ce sort sur une nouvelle cible sans coût en Tension !")
 
-    # -- NORD: cleanse_self_dot (Cracher le Sang P1) --
-    if "cleanse_self_dot" in data:
-        nb_a_retirer = data["cleanse_self_dot"]; dots_retires = []
-        for dot in ["poison", "brulure"]:
-            if dot in attaquant.effets and nb_a_retirer > 0:
-                attaquant.effets[dot]["duree"] = max(0, attaquant.effets[dot]["duree"] - 1)
-                attaquant.effets[dot]["valeur"] = max(0, attaquant.effets[dot].get("valeur",1) - 1)
-                if attaquant.effets[dot]["duree"] <= 0: del attaquant.effets[dot]
-                dots_retires.append(dot.capitalize()); nb_a_retirer -= 1
-        msg.append(f"🩸💪 **Cracher le Sang** : {chr(44).join(dots_retires)} retiré(s) !" if dots_retires else "🩸 Aucun DoT à purger.")
-
-    # -- NORD: malus_base_cible (Briseur d'Os) --
-    if "malus_base_cible" in data and defenseur:
-        defenseur.ajouter_effet("malus_base", 1, data["malus_base_cible"])
-        msg.append(f"🦴 **Briseur d'Os** : -{data['malus_base_cible']} Base sur prochain sort de {getattr(defenseur,'nom','cible')} !")
-
-    # -- NORD: status_si_serment (Briseur d'Os Avancé P3) --
-    if "status_si_serment" in data and attaquant.serment_actif and defenseur:
-        for eff_code, eff_val in data["status_si_serment"].items():
-            defenseur.ajouter_effet(eff_code, eff_val)
-            msg.append(f"🩸 **Serment** → {eff_code.capitalize()} ({eff_val}) !")
-
     # -- CLAN DU NORD : bonus_si_serment_degats (Coup de Tête Novice) --
     if "bonus_si_serment_degats" in data and attaquant.serment_actif:
         b_sd = data["bonus_si_serment_degats"]
@@ -2214,15 +2145,6 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         defenseur.ajouter_effet("bouclier", 1, val_prot)
         msg.append(f"🔮 **Déviation** : Bouclier {val_prot} posé sur {getattr(defenseur, 'nom', 'allié')} (= Foi de {getattr(attaquant, 'nom', 'lanceur')}) !")
 
-    # -- ORACLE : presage_auto_exact (Vision du Prochain Pas P1) --
-    if data.get("presage_auto_exact"):
-        if attaquant.effets.get("_vision_used"):
-            msg.append("🔮 **Vision** : Déjà utilisée ce combat.")
-        else:
-            attaquant.effets["_presage_exact"] = {"duree": 1, "valeur": 1}
-            attaquant.effets["_vision_used"] = {"duree": 9999, "valeur": 1}
-            msg.append("🔮 **Vision du Prochain Pas** : Présage de ce tour = **exact** automatiquement !")
-
     # -- ORACLE : force_pile_zone (Inversion de Probabilité Avancée) --
     if data.get("force_pile_zone") and defenseur:
         defenseur.ajouter_effet("force_pile", 2, 1)
@@ -2239,19 +2161,11 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         msg.append("📜 **Condamnée** : La cible ne peut plus recevoir de buffs pour le reste du combat !")
 
     # -- ÉCOLE DE L'ESTOC : bonus_si_passe_ce_tour (Riposte Foudroyante) --
-    # Mémoire du Corps (P4) : s'applique aussi si dernière action = Passe (tour précédent)
-    if "bonus_si_passe_ce_tour" in data:
-        _memoire_riposte = (
-            "passif_estoc_memoire" in attaquant.competences
-            and attaquant.last_action_type == "passe"
-            and not attaquant.passe_active
-        )
-        if attaquant.passe_active or _memoire_riposte:
-            b_pct = data["bonus_si_passe_ce_tour"].get("base_bonus", 0)
-            if b_pct:
-                degats_finaux += b_pct
-                tag = "🧠(Mémoire)" if _memoire_riposte else "⚔️"
-                msg.append(f"{tag} **Riposte Foudroyante** : +{b_pct} Base (Passe{'→Mémoire' if _memoire_riposte else ''}) !")
+    if "bonus_si_passe_ce_tour" in data and attaquant.passe_active:
+        b_pct = data["bonus_si_passe_ce_tour"].get("base_bonus", 0)
+        if b_pct:
+            degats_finaux += b_pct
+            msg.append(f"⚔️ **Passe active** : +{b_pct} Base (Riposte) !")
 
     # -- CONSUME_CHARGES : différencier Décharge (is_decharge) de Transmutation --
     # La distinction est gérée par is_decharge flag + self_status decharge_active déjà posé.
@@ -2268,48 +2182,6 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         msg.append(f"🔮 **Déviation Absolue** : Prochaine attaque sur {getattr(defenseur, 'nom', 'allié')} redirigée vers un ennemi (MJ désigne la nouvelle cible) !")
 
     # ─────────────────────────────────────────────────────────────────────────────
-    # -- ASSASSIN : ignore_armor_si_hemo (Coup Vicieux Novice P1) --
-    if data.get("ignore_armor_si_hemo") and defenseur and "hemorragie" in defenseur.effets:
-        attaquant._ignore_armor = True
-        msg.append("☠️ **Coup Vicieux** : Hémorragie active → Armure ignorée !")
-
-    # -- ASSASSIN : execute_if_below_20 (Coup Vicieux Avancé P5) — rappel manuel --
-    if data.get("execute_if_below_20") and defenseur and defenseur.pv_actuel > 0:
-        if defenseur.pv_actuel <= defenseur.pv_max * 0.20:
-            msg.append(f"☠️⭐ **Coup Vicieux Avancé** : {getattr(defenseur, 'nom', 'cible')} sous 20% PV → Exécution *(manuel)*")
-
-    # -- ASSASSIN : saignement_actif (Frappe Artérielle P4) --
-    if "saignement_actif" in data and defenseur:
-        defenseur.ajouter_effet("saignement_actif", 3, data["saignement_actif"])
-        msg.append(f"🩸 **Saignement Actif** : {getattr(defenseur, 'nom', 'cible')} perd {data['saignement_actif']} PV à chaque action !")
-
-    # -- SANG: drain_mana_cible (Baiser P4) --
-    if "drain_mana_cible" in data and defenseur and attaquant.classe == "mage":
-        _vol = min(data["drain_mana_cible"], getattr(defenseur,"mana",0))
-        if hasattr(defenseur,"mana"): defenseur.mana = max(0, defenseur.mana - _vol)
-        attaquant.mana = min(attaquant.mana_max, attaquant.mana + _vol)
-        msg.append(f"🩸 **Baiser du Vampire** : {_vol} MP volés à {getattr(defenseur,'nom','cible')} !")
-
-    # -- SANG: regle_banquet (Règles du Banquet P3) --
-    if data.get("regle_banquet") and defenseur:
-        defenseur.ajouter_effet("regle_banquet", 1, attaquant.user_id)
-        msg.append(f"🩸 **Règles du Banquet** : Si {getattr(defenseur,'nom','cible')} vous attaque → 1 Hémorragie !")
-
-    # -- ASSASSIN: ignore_armor_si_hemo (Coup Vicieux Novice P1) --
-    if data.get("ignore_armor_si_hemo") and defenseur and "hemorragie" in defenseur.effets:
-        attaquant._ignore_armor = True
-        msg.append("☠️ **Coup Vicieux** : Hémorragie active → Armure ignorée !")
-
-    # -- ASSASSIN: execute_if_below_20 (Coup Vicieux Avancé P5) -- rappel manuel --
-    if data.get("execute_if_below_20") and defenseur and defenseur.pv_actuel > 0:
-        if defenseur.pv_actuel <= defenseur.pv_max * 0.20:
-            msg.append(f"☠️⭐ **Coup Vicieux Avancé** : {getattr(defenseur,'nom','cible')} sous 20% PV → Exécution *(manuel)*")
-
-    # -- ASSASSIN: saignement_actif (Frappe Artérielle P4) --
-    if "saignement_actif" in data and defenseur:
-        defenseur.ajouter_effet("saignement_actif", 3, data["saignement_actif"])
-        msg.append(f"🩸 **Saignement Actif** : {getattr(defenseur,'nom','cible')} perd {data['saignement_actif']} PV à chaque action !")
-
     # HANDLERS MANQUANTS — Sous-classes V4
     # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2353,14 +2225,11 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         attaquant.effets["_bonus_marquage_avance"] = {"duree": 1, "valeur": data["bonus_si_deja_designee"]}
 
     # -- ÉCOLE DE L'ESTOC : base_override (Estoc Direct si Passe active) --
-    # base_override remplace UNIQUEMENT la valeur de Base du sort.
-    # La stat (PHY) est déjà dans degats_finaux via skill_obj.roll() — ne pas la rajouter.
     if "bonus_si_passe" in data and attaquant.passe_active:
         override = data["bonus_si_passe"].get("base_override")
         if override is not None:
-            ancienne_base = data.get("base", 5)
-            degats_finaux = degats_finaux - ancienne_base + override
-            msg.append(f"⚔️ **Estoc Direct (Passe)** : Base {ancienne_base} → {override} (+{override - ancienne_base}) !")
+            degats_finaux = override + attaquant.phy  # base_override remplace la Base entière
+            msg.append(f"⚔️ **Estoc Direct (Passe)** : Base remplacée par {override} → {degats_finaux} dégâts fixes !")
 
     # -- GÉNÉRAL : self_dmg (auto-dégât du lanceur, ex: Imposition des Mains) --
     # Géré ici pour les sorts non-Moine qui ont un self_dmg.
@@ -2374,53 +2243,6 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
             msg.append(f"💔 **Contrecoup** : {attaquant.nom} subit {dmg_self} dégâts.")
         elif dmg_self > 0:
             msg.append("⚠️ **Contrecoup** : PV insuffisants pour payer le coût en PV.")
-
-    # -- HOSP: don_soi_novice P1 --
-    if data.get("don_soi_novice") and defenseur and attaquant:
-        _dot = next((d for d in ["poison","hemorragie"] if d in defenseur.effets), None)
-        if _dot:
-            defenseur.effets[_dot]["duree"] = max(0, defenseur.effets[_dot]["duree"] - 1)
-            if defenseur.effets[_dot]["duree"] <= 0: del defenseur.effets[_dot]
-            attaquant.ajouter_effet(_dot, 1)
-            defenseur.pv_actuel = min(defenseur.pv_max, defenseur.pv_actuel + 6)
-            msg.append(f"✨ **Don de Soi** : 1 {_dot.capitalize()} transféré | +6 PV à {getattr(defenseur,'nom','allié')} !")
-        else: msg.append("✨ **Don de Soi Novice** : Aucun Poison/Hémorragie à transférer.")
-
-    # -- HOSP: don_soi P3 --
-    if data.get("don_soi") and defenseur and attaquant:
-        attaquant.pv_actuel = max(1, attaquant.pv_actuel - 10)
-        defenseur.pv_actuel = min(defenseur.pv_max, defenseur.pv_actuel + 25)
-        if hasattr(defenseur, "ferveur"): defenseur.ferveur = getattr(defenseur,"ferveur",0) + 10
-        msg.append(f"✨ **Don de Soi** : -10 PV | {getattr(defenseur,'nom','allié')} +25 PV +10 Ferveur !")
-
-    # -- HOSP: cleanse_hemo_si_aura (Suture P3) --
-    if data.get("cleanse_hemo_si_aura") and defenseur and "aura_active" in attaquant.effets:
-        if "hemorragie" in defenseur.effets:
-            del defenseur.effets["hemorragie"]
-            msg.append(f"✨ **Suture** : Hémorragie dissipée de {getattr(defenseur,'nom','cible')} !")
-
-    # -- HOSP: armure_allie (Rempart de Foi P3) --
-    if "armure_allie" in data and defenseur:
-        defenseur.ajouter_effet("bouclier", 1, data["armure_allie"])
-        msg.append(f"🛡️ **Rempart de Foi** : Armure {data['armure_allie']} sur {getattr(defenseur,'nom','allié')} !")
-
-    # -- HOSP: onde_purge (1=1 malus, 0=tous) --
-    if "onde_purge" in data and defenseur:
-        _nb = data["onde_purge"]; _neg = ["poison","brulure","gel","stun","hemorragie","root","corruption","mutilation"]
-        _ret = [e for e in _neg if e in defenseur.effets]
-        if _nb > 0: _ret = _ret[:_nb]
-        for e in _ret: del defenseur.effets[e]
-        if _ret:
-            msg.append(f"✨ **Onde de Purge** : {len(_ret)} malus retiré(s) ({', '.join(_ret)}) !")
-            if _nb > 0: attaquant.pv_actuel = min(attaquant.pv_max, attaquant.pv_actuel + 3); msg.append("✨ +3 PV à l'Hospitalier.")
-
-    # -- HOSP: soin_aoe_allie (Eclat P4 / Miracle P5) --
-    if "soin_aoe_allie" in data:
-        msg.append(f"✨ **Soin de Zone** : +{data['soin_aoe_allie']} PV à tous les alliés *(annoncez — chaque allié fait /defense)*")
-
-    # -- HOSP: resurrection_si_mort (Suture Avancée P5) -- rappel manuel --
-    if data.get("resurrection_si_mort") and defenseur and defenseur.pv_actuel <= 0:
-        msg.append(f"✨⭐ **Suture Avancée** : {getattr(defenseur,'nom','allié')} peut être ressuscité(e) à 5 PV *(appliquer manuellement)*")
 
     # -- ORDRE HOSPITALIER : soin_cible (Imposition des Mains) --
     # Soin fixe supplémentaire sur la cible, en plus du jet normal.
@@ -2648,13 +2470,7 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
         msg_effet = f"\n💥 **Puissance :** {total}"
     
     appliquer_cooldown(p, sort)
-
-    # École de l'Estoc : si un Estoc est joué via action_bonus, consomme la Passe
-    try:
-        _dj_ab = json.loads(skill_data.get("data_json", "{}"))
-        if _dj_ab.get("bonus_si_passe") and p.passe_active:
-            p.passe_active = 0
-    except (json.JSONDecodeError, TypeError): pass
+    
 
     if cible and cible.id != interaction.user.id:
         p_cible.sauvegarder()
@@ -2834,15 +2650,6 @@ async def tour(interaction: discord.Interaction):
             elif code == "malus_base":
                 malus_b_val = data.get("valeur", 0)
                 rapport_effets.append(f"🔮 **Touche du Destin** : -{malus_b_val} Base sur votre prochain sort !")
-            elif code == "toxine":
-                nb_toxine = data.get("valeur", 1)
-                rapport_effets.append(f"☠️ **Toxine** ({nb_toxine}) : -{nb_toxine} Pièce(s) sur votre prochain jet !")
-            elif code == "silence":
-                rapport_effets.append("🤫 **Silence** : Impossible d'utiliser un sort magique ce tour !")
-            elif code == "toxine":
-                rapport_effets.append(f"☠️ **Toxine** : -{data.get('valeur',1)} Pièce(s) sur votre prochain jet !")
-            elif code == "silence":
-                rapport_effets.append("🤫 **Silence** : Impossible d'utiliser un sort magique ce tour !")
             elif code == "malus_bonus_pieces":
                 malus_bp_val = data.get("valeur", 0)
                 rapport_effets.append(f"🔮 **Présage exact** : -{malus_bp_val} Bonus Pièces sur votre prochain sort !")
@@ -2852,8 +2659,6 @@ async def tour(interaction: discord.Interaction):
                 rapport_effets.append("🎯 **Paralysie Neurale** : Action Bonus bloquée ce tour.")
             elif code == "force_pile":
                 rapport_effets.append("🔮 **Inversion** : Votre prochain jet de dés = toutes pièces Pile !")
-            elif code == "no_regen":
-                rapport_effets.append("🔮 **No Régénération** : Régénération bloquée ce tour !")
             elif code == "no_buff":
                 rapport_effets.append("📜 **Condamné(e)** : Aucun soin ni buff possible pour le reste du combat.")
 
@@ -2886,26 +2691,23 @@ async def tour(interaction: discord.Interaction):
 
     # --- ORDRE HOSPITALIER : Entretien de l'Aura de Sacrifice ---
     if "ordre_hospitalier" in p.sous_classes_unlocked and "aura_active" in p.effets and p.pv_actuel > 0:
-        _asc = "passif_hosp_ascension" in p.competences and p.pv_actuel <= 1
-        cout_aura = 0 if _asc else 3
-        if cout_aura == 0 or p.ferveur >= cout_aura:
-            if cout_aura > 0: p.ferveur -= cout_aura
-            _tag = " *(L'Ascension: gratuite + -10 dégâts alliés)*" if _asc else f" (-{cout_aura} Ferveur)"
-            rapport_effets.append(f"✨ **Aura de Sacrifice** active{_tag}.")
-            _foi = "passif_hosp_foi" in p.competences or "passif_hosp_resilience" in p.competences
-            if _foi and p.pv_actuel <= 1 and not _asc:
+        cout_aura = 3
+        if p.ferveur >= cout_aura:
+            p.ferveur -= cout_aura
+            rapport_effets.append(f"✨ **Aura de Sacrifice** active (-{cout_aura} Ferveur entretien).")
+            # Passif Foi Inébranlable (P2) : l'Aura se coupe à 1 PV
+            if "passif_hosp_resilience" in p.competences and p.pv_actuel <= 1:
                 del p.effets["aura_active"]
                 rapport_effets.append("✨ **Foi Inébranlable** : Aura coupée (1 PV).")
         else:
             del p.effets["aura_active"]
             rapport_effets.append("✨ **Aura de Sacrifice** : Ferveur insuffisante — Aura désactivée !")
 
+    # --- PRIÈRE CONSTANTE : +10 Ferveur par tour (inconditionnelle) ---
     if p.classe == "pretre" and p.pv_actuel > 0:
-        if "no_regen" in p.effets:
-            rapport_effets.append("🙏 **Prière Constante** : Bloquée par 🔮 **No Régénération** !")
-        else:
-            p.ferveur += 10
-            rapport_effets.append("🙏 **Prière Constante** : +10 Ferveur.")
+        gain_passif = 10
+        p.ferveur += gain_passif
+        rapport_effets.append(f"🙏 **Prière Constante** : +{gain_passif} Ferveur.")
 
     # --- PASSIF HOTE DU BANQUET : démarre combat à 10 Festin si à 0 ---
     if "passif_sang_hote" in p.competences and p.classe == "mage" and p.festin == 0:
@@ -2914,11 +2716,8 @@ async def tour(interaction: discord.Interaction):
 
     # --- MOINE DU LOTUS : passif Souffle +3 Ferveur si Concentré ---
     if "passif_lotus_souffle" in p.competences and p.concentre and p.pv_actuel > 0:
-        if "no_regen" not in p.effets:
-            p.ferveur += 3
-            rapport_effets.append("🌸 **Souffle du Lotus** : +3 Ferveur (Concentré).")
-        else:
-            rapport_effets.append("🌸 **Souffle du Lotus** : Bloqué (No Régénération).")
+        p.ferveur += 3
+        rapport_effets.append("🌸 **Souffle du Lotus** : +3 Ferveur (Concentré).")
 
     # --- LÉGION DE FER : Posture Forcée (Dernier Rempart) décrémente séparément ---
     if "posture_forcee" in p.effets:
@@ -3005,23 +2804,12 @@ async def tour(interaction: discord.Interaction):
         hud_v4 += f"\n{statut_posture}"
     # Serment du Sang (Clan du Nord)
     if "clan_nord" in p.sous_classes_unlocked and p.serment_actif:
-        _max_s = 10 if "passif_nord_fer" in p.competences else 8
-        _max_bas_s = 15 if "passif_nord_fer" in p.competences else 12
-        _sc = p.pv_actuel <= p.pv_max * 0.3
-        hud_v4 += f"\n🩸 **Serment actif** : +{p.serment_bonus} Base (max {_max_bas_s if _sc else _max_s}){ ' ⚠️ <30% PV' if _sc else ''}"
+        hud_v4 += f"\n🩸 **Serment actif** (Bonus : +{p.serment_bonus})"
+    # Concentré/Perturbé (Moine du Lotus)
     if "moine_lotus" in p.sous_classes_unlocked:
         etat_moine = "🌸 **Concentré**" if p.concentre else "🔥 **Perturbé** (+4 Dégâts)"
-        _harmonie_tag = ""
-        if "passif_lotus_harmonie" in p.competences and not p.concentre:
-            _harmonie_tag = " *(Harmonie utilisée)*" if p.effets.get("_harmonie_used") else " *(*/reconcentrer* dispo)*"
-        hud_v4 += f"\n{etat_moine}{_harmonie_tag}"
-    if "oracle" in p.sous_classes_unlocked:
-        if p.effets.get("_presage_exact"):
-            _tiss_tag = " + Seuil garanti" if p.effets.get("_tisserand_actif") else ""
-            _inev_tag = " + Statuts sans seuil" if p.effets.get("_inevitable_actif") else ""
-            hud_v4 += f"\n🔮 **Présage exact** ce tour !{_tiss_tag}{_inev_tag}"
-        if p.effets.get("_vision_used"): hud_v4 += "\n👁️ *Vision utilisée ce combat*"
-
+        hud_v4 += f"\n{etat_moine}"
+    # Lestages gravitationnels (sur soi)
     lestage_perso = get_lestage(p)
     if lestage_perso > 0:
         hud_v4 += f"\n⚖️ **Lestages** : {lestage_perso}"
@@ -3030,19 +2818,7 @@ async def tour(interaction: discord.Interaction):
         hud_v4 += f"\n🎯 **Désignation** active ({p.designation_stacks} stack(s))"
     # Sentence (Inquisiteur)
     if p.sentence_targets:
-        _noms_condamnes = []
-        for _uid_s in p.sentence_targets:
-            _pc_s = Personnage.charger(_uid_s)
-            _noms_condamnes.append(_pc_s.nom if _pc_s else f"#{_uid_s}")
-        hud_v4 += f"\n📜 **Sentence** ({len(p.sentence_targets)}) : {', '.join(_noms_condamnes)}"
-    # Ordre Hospitalier
-    if "ordre_hospitalier" in p.sous_classes_unlocked:
-        if "aura_active" in p.effets:
-            _asc_h = "passif_hosp_ascension" in p.competences and p.pv_actuel <= 1
-            _tag_h = " *(Ascension: -10 gratuit)*" if _asc_h else ""
-            hud_v4 += f"\n✨ **Aura ACTIVE** (-5 dégâts alliés){_tag_h}"
-        else:
-            hud_v4 += "\n⬜ Aura inactive"
+        hud_v4 += f"\n📜 **Sentence** prononcée"
     # Passe Estoc
     if p.passe_active:
         hud_v4 += f"\n⚔️ **Passe active !**"
@@ -3117,25 +2893,11 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Me
     else:
         p_cible = Personnage.charger(cible.id)
     if not p_cible: return await interaction.response.send_message("❌ Cible invalide.", ephemeral=True)
-    if p_cible.effets.get("no_soin_next_turn"):
-        del p_cible.effets["no_soin_next_turn"]; p_cible.sauvegarder()
-        return await interaction.response.send_message(f"🌸 **Paume du Vide** : **{p_cible.nom}** ne peut pas recevoir de soin ce tour !", ephemeral=True)
     if sort not in SKILLS_DB: return await interaction.response.send_message("❌ Sort introuvable.", ephemeral=True)
     
     skill_data = SKILLS_DB[sort]
     if skill_data.get('type') != 'soin':
         return await interaction.response.send_message(f"🚫 Pas un sort de soin.", ephemeral=True)
-
-    # --- ASSASSIN : Neurotoxine P2 — Toxine bloque l'action Bonus ---
-    if "toxine" in p.effets:
-        return await interaction.followup.send(
-            "☠️ **Neurotoxine** : Vous êtes sous **Toxine** — action Bonus impossible ce tour !",
-            ephemeral=True
-        )
-
-    # Assassin: Neurotoxine — Toxine bloque l'action Bonus
-    if "toxine" in p.effets:
-        return await interaction.followup.send("☠️ **Neurotoxine** : Vous êtes sous **Toxine** — action Bonus impossible !", ephemeral=True)
 
     # --- BLOCAGES : no_soin (Paume du Vide) et no_buff (Purification Inquisiteur) ---
     if "no_soin" in p_cible.effets:
@@ -3151,9 +2913,6 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Me
 
     # Coûts (Code existant inchangé pour la brièveté, mais à garder)
     cout = skill_data.get("cout", 0); cout_type = skill_data.get("cout_type", "mana")
-    if ("ordre_hospitalier" in p.sous_classes_unlocked and "passif_hosp_martyre" in p.competences
-            and "aura_active" in p.effets and skill_data.get("cat") == "tronc" and cout_type == "ferveur"):
-        cout = max(0, cout // 2)
     cout_paye_en_pv = False
     if cout > 0:
         valeur_actuelle = getattr(p, cout_type, 0)
@@ -3192,8 +2951,7 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Me
         visuel.append(f"🙏(+{heads} Ferv)")
 
     # --- MOINE DU LOTUS : soin_base (fixe) + concentre_bonus + self_dmg ---
-    try: data_j = json.loads(skill_data.get("data_json", "{}"))
-    except (json.JSONDecodeError, TypeError): data_j = {}
+    data_j = json.loads(skill_data.get("data_json", "{}"))
     msg_lotus_soin = ""
     if "moine_lotus" in p.sous_classes_unlocked and "soin_base" in data_j:
         soin_fixe = data_j["soin_base"]
@@ -3237,20 +2995,10 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Me
         p.ajouter_effet("corruption", 3, 1) # Durée 3, Puissance 1
         msg_peste = "\n☣️ **CONTAGION :** La corruption infecte le soigneur !"
         
-    _data_j_soin = {}
-    try: _data_j_soin = json.loads(skill_data.get("data_json", "{}"))
-    except: pass
-    if _data_j_soin.get("cleanse_all") and "moine_lotus" in p.sous_classes_unlocked:
-        _negatifs_lotus = ["poison","brulure","gel","stun","hemorragie","root","corruption","mutilation"]
-        _retires_all = [e for e in _negatifs_lotus if e in p_cible.effets]
-        for e in _retires_all: del p_cible.effets[e]
-        if _retires_all: msg_lotus_soin += f"\n🌸 **Purification totale** : {', '.join(_retires_all)} dissipé(s)."
     anciens_pv = p_cible.pv_actuel
     p_cible.pv_actuel = min(p_cible.pv_max, p_cible.pv_actuel + total_soin)
     
     appliquer_cooldown(p, sort)
-    if "moine_lotus" in p.sous_classes_unlocked and p.last_action_type != "passe":
-        p.last_action_type = "sous_classe" if skill_data.get("cat") == "spe" else "soin"
     p.sauvegarder()
     p_cible.sauvegarder()
 
@@ -3398,8 +3146,6 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
     p_attaquant: Personnage = clash_data['p_attaquant'] # <-- Maintenant il sait !
     skill_a_org: Skill = clash_data['skill_a'] # Ton éditeur saura que c'est une technique !
 
-    if not p_defenseur: return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
-
     # --- VÉRIFICATIONS DÉFENSEUR ---
     if p_defenseur.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
     if "stun" in p_defenseur.effets: return await interaction.followup.send("💫 **Étourdi !** Impossible de riposter.", ephemeral=True)
@@ -3509,7 +3255,6 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
 
     coins_a = skill_a_org.coins; coins_b = skill_b_org.coins
     tour_clash = 1
-    last_score_perdant = 0  # Passe Royale : score brut du perdant au dernier round
     
     # Bonus niveau (Overwhelm)
     bonus_lvl_a = p_attaquant.get_bonus_niveau()
@@ -3572,7 +3317,6 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         resultat_txt = ""; color_embed = 0x3498db
         if tot_a > tot_b:
             coins_b -= 1
-            last_score_perdant = tot_b  # Passe Royale : score brut du perdant
             resultat_txt = f"💥 **{p_attaquant.nom}** touche !"
             color_embed = 0xe74c3c
             # Contre-Temps (École de l'Estoc P2) : +1 Tension si round gagné
@@ -3581,7 +3325,6 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
                 resultat_txt += " ⚡+1T"
         elif tot_b > tot_a:
             coins_a -= 1
-            last_score_perdant = tot_a  # Passe Royale : score brut du perdant
             resultat_txt = f"💥 **{p_defenseur.nom}** contre !"
             color_embed = 0x2ecc71
             # Contre-Temps (École de l'Estoc P2) : +1 Tension si round gagné
@@ -3589,7 +3332,6 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
                 p_defenseur.tension = min(p_defenseur.tension + 1, 20)
                 resultat_txt += " ⚡+1T" 
         else:
-            last_score_perdant = 0
             resultat_txt = "⚖️ **Égalité !**"
             color_embed = 0x95a5a6 
 
@@ -3701,19 +3443,13 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
             except (json.JSONDecodeError, AttributeError): pass
 
         # --- ÉCOLE DE L'ESTOC : retour_degats_si_marge_3 (Passe Royale P5) ---
-        # Design : si le vainqueur gagne avec 3+ pièces de marge, le perdant reçoit
-        # EN PLUS les dégâts de SON PROPRE score brut (last_score_perdant).
         msg_retour = ""
         if vainqueur.effets.pop("_retour_marge_3", None):
-            marge = pieces_restantes
+            marge = pieces_restantes  # pièces restantes du vainqueur = marge
             if marge >= 3:
-                dmg_retour = max(1, last_score_perdant)
-                perdant.pv_actuel = max(0, perdant.pv_actuel - dmg_retour)
-                msg_retour = (
-                    f"\n⚔️ **Passe Royale** : Marge de {marge} pièces — "
-                    f"{perdant.nom} subit **{dmg_retour}** dégâts supplémentaires "
-                    f"(sa propre attaque retournée) !"
-                )
+                vainqueur.effets.pop("_retour_marge_3", None)
+                perdant.pv_actuel = max(0, perdant.pv_actuel - damage_final)
+                msg_retour = f"\n⚔️ **Passe Royale** : Marge de {marge} pièces — {perdant.nom} subit également {damage_final} dégâts en retour !"
                 perdant.sauvegarder()
 
         if msg_clash_statut: bonus_txt += msg_clash_statut
@@ -3727,13 +3463,11 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         if vainqueur == p_attaquant:
             cibles_sec_gagnant = clash_data.get('cibles_sec_a')
             if clash_data.get('ref_a') in SKILLS_DB:
-                try: data_gagnant = json.loads(SKILLS_DB[clash_data['ref_a']].get('data_json', '{}'))
-                except (json.JSONDecodeError, TypeError): data_gagnant = {}
+                data_gagnant = json.loads(SKILLS_DB[clash_data['ref_a']].get('data_json', '{}'))
         elif vainqueur == p_defenseur:
             cibles_sec_gagnant = cibles_secondaires
             if sort in SKILLS_DB:
-                try: data_gagnant = json.loads(SKILLS_DB[sort].get('data_json', '{}'))
-                except (json.JSONDecodeError, TypeError): data_gagnant = {}
+                data_gagnant = json.loads(SKILLS_DB[sort].get('data_json', '{}'))
 
         embed_fin = discord.Embed(title="FIN DU CLASH", color=0xF1C40F)
         embed_fin.description = f"🏆 **{vainqueur.nom}** l'emporte !"
@@ -3801,63 +3535,14 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
         _cv, _cnt = Counter(p.charges_elementaires).most_common(1)[0]
         if _cnt >= 3 and all(e == _cv for e in p.charges_elementaires): cout = max(0, cout // 2)
 
-    # Assassin : Toxine réduit les pièces de l'attaquant
-    _toxine_malus = 0
-    if "toxine" in p.effets:
-        _toxine_malus = p.effets["toxine"].get("valeur", 1)
-        skill_obj.coins = max(1, skill_obj.coins - _toxine_malus)
-        visuel.append(f"☠️(-{_toxine_malus}🎲 Toxine)")
-
-    # Assassin : Silence bloque les sorts SC de mage/prêtre
-    if "silence" in p.effets and p.classe in ("mage", "pretre") and skill_data.get("cat") == "spe":
-        return await interaction.followup.send("🤫 **Silence** : Impossible d'utiliser un sort magique ce tour !", ephemeral=True)
-
-    # Assassin : Bourreau des Ombres P3 — 3+ altérations → coût TC à 0
-    if ("assassin_confrerie" in p.sous_classes_unlocked
-            and "passif_assassin_bourreau" in p.competences
-            and skill_data.get("cat") == "tronc"
-            and cout_type == "tension"
-            and get_nb_alterations(p_cible) >= 3):
-        cout = 0
-
-    # Assassin: Toxine réduit les pièces
-    _toxine_malus = 0
-    if "toxine" in p.effets:
-        _toxine_malus = p.effets["toxine"].get("valeur", 1)
-        skill_obj.coins = max(1, skill_obj.coins - _toxine_malus)
-        visuel.append(f"☠️(-{_toxine_malus}🎲 Toxine)")
-    if "silence" in p.effets and p.classe in ("mage","pretre") and skill_data.get("cat") == "spe":
-        return await interaction.followup.send("🤫 **Silence** : Impossible d'utiliser un sort magique ce tour !", ephemeral=True)
-
-    # Assassin: Bourreau des Ombres — 3+ altérations → coût TC à 0
-    if ("assassin_confrerie" in p.sous_classes_unlocked and "passif_assassin_bourreau" in p.competences
-            and skill_data.get("cat") == "tronc" and cout_type == "tension"
-            and get_nb_alterations(p_cible) >= 3):
-        cout = 0
-
     # Légion de Fer : cout_zero_si_posture — annule le coût AVANT débit
     try:
         _dj = json.loads(skill_data.get("data_json", "{}"))
         if _dj.get("cout_zero_si_posture") and p.posture_active:
             cout = 0
-        elif ("legion_fer" in p.sous_classes_unlocked and p.posture_active
-              and cout_type == "tension" and skill_data.get("cat") == "spe" and cout > 0):
-            cout = max(0, cout - 1)
         if _dj.get("coins_bonus_si_posture") and p.posture_active:
             skill_data = dict(skill_data)
             skill_data["coins"] = skill_data.get("coins", 0) + _dj["coins_bonus_si_posture"]
-        # ── École de l'Estoc : cout_zero si passe_active (Estocs) ──
-        # Mémoire du Corps (P4) : s'applique aussi si dernière action = Passe (tour précédent)
-        if "ecole_estoc" in p.sous_classes_unlocked:
-            _bp = _dj.get("bonus_si_passe", {})
-            if _bp.get("cout_zero"):
-                _memoire_ok = (
-                    "passif_estoc_memoire" in p.competences
-                    and p.last_action_type == "passe"
-                    and not p.passe_active
-                )
-                if p.passe_active or _memoire_ok:
-                    cout = 0
     except (json.JSONDecodeError, TypeError): pass
 
     # Art de l'Estoc Maîtrisé (École de l'Estoc P5) : -1 Tension par Passe jouée (max -3)
@@ -3951,13 +3636,6 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
     json_data = skill_data.get('data_json', '{}')
     total, msg_effets_spe = traiter_effets_json(json_data, p, p_cible, total, heads=heads)
 
-    # Nord: reset serment_bonus après sort SC
-    if ("clan_nord" in p.sous_classes_unlocked and p.serment_actif
-            and skill_data.get("cat") == "spe" and p.serment_bonus > 0):
-        try: _dj_sc = json.loads(json_data)
-        except (json.JSONDecodeError, TypeError): _dj_sc = {}
-        if not _dj_sc.get("apply_serment_bonus"): p.serment_bonus = 0
-
     # --- Passifs & Mécaniques ---
     if "gel" in p_cible.effets:
         total = int(total * 1.5)
@@ -3978,34 +3656,14 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
             msg_festin = f"\n🩸 **Festin Stade 1** : +3 Dégâts."
             visuel.append("🩸+3(Stade1)")
 
-    # --- ASSASSIN : Lame Infectée P1 — 25% chance sur TC ---
-    msg_sadisme_lame = ""
-    if ("assassin_confrerie" in p.sous_classes_unlocked
-            and "passif_assassin_lame" in p.competences
-            and skill_data.get("cat") == "tronc" and total > 0):
-        if random.random() < 0.25:
-            msg_sadisme_lame = "\n☠️ **Lame Infectée** : Proc ! Choisissez **Poison** ou **Hémorragie** (1 stack) — annoncez puis `/appliquer`."
-
-    # --- MAGIE DU SANG: Lame Infectée P1 — 25% TC ---
-    if ("magie_sang" in p.sous_classes_unlocked and "passif_sang_lame" in p.competences
-            and skill_data.get("cat") == "tronc" and p.classe == "mage" and total > 0):
-        if random.random() < 0.25:
-            msg_festin += "\n🩸 **Lame Infectée** : Proc ! Choisissez **Poison** ou **Hémorragie** (1 stack) — `/appliquer`."
-
     # --- SADISME TACTIQUE (Assassin de la Confrérie P1) — TC uniquement ---
-    msg_sadisme_lame = ""
-    if ("assassin_confrerie" in p.sous_classes_unlocked and "passif_assassin_lame" in p.competences
-            and skill_data.get("cat") == "tronc" and total > 0):
-        if random.random() < 0.25:
-            msg_sadisme_lame = "\n☠️ **Lame Infectée** : Proc ! Choisissez **Poison** ou **Hémorragie** — `/appliquer`."
-
     msg_sadisme = ""
     _is_tc = skill_data.get("cat") == "tronc"
     if "assassin_confrerie" in p.sous_classes_unlocked and _is_tc:
         nb_alts = get_nb_alterations(p_cible)
         if "passif_assassin_sadisme" in p.competences:
             if nb_alts >= 3:
-                total += 12; msg_sadisme = f"\n🗡️ **Sadisme Tactique** : +12 dégâts ({nb_alts} altérations) — ⚡ **Inesquivable** !"
+                total += 12; msg_sadisme = f"\n🗡️ **Sadisme Tactique** : +12 dégâts ({nb_alts} altérations) !"
             elif nb_alts == 2:
                 total += 8;  msg_sadisme = f"\n🗡️ **Sadisme Tactique** : +8 dégâts ({nb_alts} altérations) !"
             elif nb_alts == 1:
@@ -4036,11 +3694,12 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
             p._ignore_armor = True
             p._ignore_rob   = True
             msg_sadisme += "\n🗡️ **L'Heure du Crime** : Armure + Robustesse ignorées (cible empoisonnée)."
-    # Exécution Chirurgicale (P5) : rappel manuel
+    # Exécution Chirurgicale (P5) : tous sorts — cible ≤25% PV avec 3+ altérations
     if "assassin_confrerie" in p.sous_classes_unlocked and "passif_assassin_exe" in p.competences:
         seuil_exe = p_cible.pv_max * 0.25
-        if p_cible.pv_actuel > 0 and p_cible.pv_actuel <= seuil_exe and get_nb_alterations(p_cible) >= 3:
-            msg_sadisme += f"\n☠️⭐ **Exécution Chirurgicale** disponible : {p_cible.nom} sous 25% PV + 3+ altérations *(à appliquer manuellement)*"
+        if p_cible.pv_actuel <= seuil_exe and get_nb_alterations(p_cible) >= 3:
+            p_cible.pv_actuel = 0
+            msg_sadisme += f"\n💀 **Exécution Chirurgicale** : {p_cible.nom} est exécuté(e) !"
 
     # --- RÉSONANCE ÉLÉMENTAIRE : Bonus Dégâts Feu ---
     msg_resonance = ""
@@ -4083,18 +3742,12 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
                 data_j_estoc = json.loads(skill_data.get("data_json","{}"))
                 bonus_p = data_j_estoc.get("bonus_si_passe", {})
                 if bonus_p:
-                    # cout_zero déjà appliqué au coût — on affiche juste le tag
                     if bonus_p.get("cout_zero"):
-                        visuel.append("⚔️(0💢 Passe)")
+                        pass  # géré au coût
                     coins_b = bonus_p.get("coins_bonus", 0)
                     if coins_b:
                         skill_obj.coins += coins_b
-                        # Reroll propre avec poison réappliqué si nécessaire
                         total, visuel, heads = skill_obj.roll(bonus_niveau=bonus_niv)
-                        if "poison" in p.effets:
-                            _malus_psn = (5 + p.niveau) // 5
-                            total -= _malus_psn
-                            visuel.append(f"☠️(-{_malus_psn} Psn)")
                         visuel.append(f"⚔️+{coins_b}🪙(Passe)")
                     if memoire_active and not p.passe_active:
                         visuel.append("🧠(Mémoire)")
@@ -4129,10 +3782,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
 
     # --- MISE À JOUR last_action_type + état Moine ---
     prev_action = p.last_action_type  # Déjà persisté en DB, pas besoin de effets[]
-    # Si traiter_effets_json a posé "passe" via pose_passe, on le respecte.
-    # Sinon : TC → "TC_attaque", sous-classe → "sous_classe".
-    if p.last_action_type != "passe":
-        p.last_action_type = "TC_attaque" if skill_data.get("cat") == "tronc" else "sous_classe"
+    p.last_action_type = "TC_attaque" if skill_data.get("cat") == "tronc" else "sous_classe"
     # Moine : deux TC consécutives = Perturbé (sauf Éveil P5)
     if "moine_lotus" in p.sous_classes_unlocked and p.concentre:
         if "passif_lotus_eveil" not in p.competences:
@@ -4163,7 +3813,10 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
             and "loge_ombre" in p.sous_classes_unlocked
             and "passif_ombre_regulateur" in p.competences
             and p.designation_target_id == p_cible.user_id):
-        msg_regulateur = "\n🎯⭐ **Grand Régulateur** : Cible Désignée éliminée ! → +15 Mana + nouvelle Désignation *(appliquer manuellement via `/set_stat` et `/designation`)*"
+        p.mana = min(p.mana_max, p.mana + 15)
+        p.designation_target_id = 0
+        p.designation_stacks = 1  # nouvelle Désignation gratuite prête
+        msg_regulateur = "\n🎯⭐ **Grand Régulateur** : Kill sur cible Désignée ! +15 Mana + Désignation rechargée !"
 
     appliquer_cooldown(p, sort)
     p.sauvegarder()
@@ -4185,18 +3838,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
     if msg_designation: msg_v4 += f"\n{msg_designation}"
     if msg_sentence: msg_v4 += f"\n{msg_sentence}"
     if msg_posture_atk: msg_v4 += msg_posture_atk
-    if msg_sadisme_lame: msg_v4 += msg_sadisme_lame
-    if msg_sadisme_lame: msg_v4 += msg_sadisme_lame
     if msg_sadisme: msg_v4 += msg_sadisme
-    if ("assassin_confrerie" in p.sous_classes_unlocked and "passif_assassin_ange" in p.competences
-            and p_cible.pv_actuel <= 0 and get_nb_alterations(p_cible) >= 3):
-        msg_v4 += "\n☠️⭐ **L'Ange Noir** : Kill 3+ altérations → +5 Tension +15 PV *(manuel)*"
-    # L'Ange Noir P5 : rappel manuel si kill avec 3+ altérations
-    if ("assassin_confrerie" in p.sous_classes_unlocked
-            and "passif_assassin_ange" in p.competences
-            and p_cible.pv_actuel <= 0
-            and get_nb_alterations(p_cible) >= 3):
-        msg_v4 += "\n☠️⭐ **L'Ange Noir** : Kill avec 3+ altérations ! → +5 Tension +15 PV *(à appliquer manuellement)*"
     if msg_estoc_maitre: msg_v4 += msg_estoc_maitre
     if msg_regulateur: msg_v4 += msg_regulateur
     embed.description = f"**{p.nom}** attaque **{p_cible.nom}** !\n*« {description} »*{msg_hemo}{msg_festin}{msg_resonance}{msg_v4}"
@@ -4328,6 +3970,18 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
             reduction_extra += val_bouclier
             del p.effets["bouclier"]
 
+        # --- MOINE : Posture du Lotus (armure_concentre / armure_perturbe) ---
+        if "moine_lotus" in p.sous_classes_unlocked and "posture_lotus_active" in p.effets:
+            lotus_data = p.effets["posture_lotus_active"]
+            if p.concentre:
+                val_l = lotus_data.get("armure_concentre", lotus_data.get("armure_base", 0))
+                msg_detail.append(f"• 🌸 **Posture Lotus (Concentré)** : -{val_l}")
+            else:
+                val_l = lotus_data.get("armure_perturbe", lotus_data.get("armure_base", 0))
+                msg_detail.append(f"• 🔥 **Posture Lotus (Perturbé)** : -{val_l}")
+            reduction_extra += val_l
+            del p.effets["posture_lotus_active"]
+
         nom_ressource = ""; stock_actuel = 0; multiplicateur = 0
         if p.classe == "guerrier": nom_ressource = "tension"; stock_actuel = p.tension; multiplicateur = 4
         elif p.classe == "mage": nom_ressource = "mana"; stock_actuel = p.mana; multiplicateur = 2
@@ -4382,12 +4036,6 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
     msg_passe_t = appliquer_passe_trigger(p)
     if msg_passe_t: msg_v4_def += f"\n{msg_passe_t}"
 
-    # --- SANG: Règles du Banquet —  hémorragie si attaque le lanceur ---
-    if "regle_banquet" in p.effets:
-        del p.effets["regle_banquet"]
-        p.ajouter_effet("hemorragie", 1)
-        msg_v4_def += "\n🩸 **Règles du Banquet** : Attaque interdite ! 1 Hémorragie infligée !"
-
     # --- PARADE ABSORB (École de l'Estoc P3) : réduit dégâts ---
     degats_finaux, msg_parade = appliquer_parade_absorb(p, degats_finaux)
     if msg_parade: msg_v4_def += f"\n{msg_parade}"
@@ -4415,10 +4063,6 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
         if p.classe == "guerrier":
             p.tension += 1
             msg_gain = "\n💢 **+1 Tension** (Douleur)"
-
-        # Sang des Saints P4: Poison expire en 1 tour
-        if "passif_hosp_sang" in p.competences and "poison" in p.effets:
-            p.effets["poison"]["duree"] = 1
 
         # --- SERMENT DU SANG (Clan du Nord) : calcul bonus ---
         if "clan_nord" in p.sous_classes_unlocked and p.serment_actif:
@@ -4468,11 +4112,12 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
     # --- REBOND ACTIF (Rempart de Corps Avancé) : renvoie dégâts si des dégâts ont été bloqués ---
     msg_rebond = ""
     if "rebond_actif" in p.effets:
+        dmg_bloques_total = max(0, degats_subis - degats_finaux)
         val_rebond = p.effets["rebond_actif"]["valeur"]
         del p.effets["rebond_actif"]
-        if degats_finaux == 0 and degats_subis > 0:
-            msg_rebond = f"\n⚔️ **Rebond de Rempart** : Attaque stoppée ! {val_rebond} dégâts renvoyés !"
-            embed.add_field(name="↩️ Rebond", value=f"Attaque bloquée nette. L'attaquant subit **{val_rebond}** dégâts (annoncez-le).", inline=False)
+        if dmg_bloques_total > 0:
+            msg_rebond = f"\n⚔️ **Rebond de Rempart** : {val_rebond} dégâts renvoyés à l'attaquant !"
+            embed.add_field(name="↩️ Rebond", value=f"L'attaquant subit **{val_rebond}** dégâts en retour (annoncez-le).", inline=False)
         p.sauvegarder()
     
     # Aura de Sacrifice (Ordre Hospitalier P1) :
@@ -4491,20 +4136,17 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
                 if (p_hosp and p_hosp.pv_actuel > 0
                         and "ordre_hospitalier" in p_hosp.sous_classes_unlocked
                         and "aura_active" in p_hosp.effets):
-                    _asc2 = "passif_hosp_ascension" in p_hosp.competences and p_hosp.pv_actuel <= 1
-                    _sang2 = "passif_hosp_sang" in p_hosp.competences or "passif_hosp_martyr" in p_hosp.competences
-                    if _asc2: transfert = 10
-                    elif _sang2 and p_hosp.pv_actuel <= p_hosp.pv_max * 0.25: transfert = 6
-                    else: transfert = 5
+                    transfert = 6 if ("passif_hosp_martyr" in p_hosp.competences and p_hosp.pv_actuel <= p_hosp.pv_max * 0.25) else 3
                     transfert = min(transfert, degats_finaux)
-                    degats_finaux -= transfert; p.pv_actuel += transfert
-                    _foi2 = "passif_hosp_foi" in p_hosp.competences or "passif_hosp_resilience" in p_hosp.competences
-                    dmg_h = transfert if not _foi2 else max(0, min(transfert, p_hosp.pv_actuel - 1))
-                    p_hosp.pv_actuel -= dmg_h
-                    _vigi2 = "passif_hosp_vigilance" in p_hosp.competences or "passif_hosp_aura" in p_hosp.competences
-                    if _vigi2 and p_hosp.pv_actuel > p_hosp.pv_max * 0.20:
+                    degats_finaux -= transfert
+                    # Rembourser les PV déjà prélevés sur le défenseur
+                    p.pv_actuel += transfert
+                    p_hosp.pv_actuel -= transfert
+                    # Passif Vigilance du Martyr (P1) : +1 Verset par transfert si >20% PV
+                    if "passif_hosp_aura" in p_hosp.competences and p_hosp.pv_actuel > p_hosp.pv_max * 0.20:
                         p_hosp.versets = getattr(p_hosp, "versets", 0) + 1
-                    if _foi2 and p_hosp.pv_actuel <= 1 and not _asc2:
+                    # Foi Inébranlable (P2) : coupe l'Aura si l'Hospitalier tombe à 1 PV
+                    if "passif_hosp_resilience" in p_hosp.competences and p_hosp.pv_actuel <= 1:
                         del p_hosp.effets["aura_active"]
                     p_hosp.sauvegarder()
                     p.sauvegarder()
@@ -4657,6 +4299,17 @@ async def serment(interaction: discord.Interaction):
     if p.serment_actif:
         return await interaction.response.send_message("⚠️ Le Serment du Sang est **déjà actif**.", ephemeral=True)
 
+    # --- CONDITION : avoir perdu au moins 40% de ses PV max ---
+    seuil_serment = int(p.pv_max * 0.6)
+    if p.pv_actuel > seuil_serment:
+        pv_manquants = p.pv_actuel - seuil_serment
+        return await interaction.response.send_message(
+            f"🩸 **Serment refusé.** La Tribu ne jure que dans la douleur.\n"
+            f"Vous devez avoir perdu au moins **40% de vos PV** ({int(p.pv_max * 0.4)} PV).\n"
+            f"Il vous faut encore perdre **{pv_manquants} PV** avant de pouvoir prononcer le Serment.",
+            ephemeral=True
+        )
+
     p.serment_actif = 1
     p.serment_bonus = 0
     msg_bonus = ""
@@ -4672,26 +4325,6 @@ async def serment(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="reconcentrer", description="🌸 (Moine) Retrouver Concentré — 30 Ferveur (Harmonie Parfaite P4)")
-async def reconcentrer(interaction: discord.Interaction):
-    p: Personnage = Personnage.charger(interaction.user.id)
-    if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
-    if "moine_lotus" not in p.sous_classes_unlocked:
-        return await interaction.response.send_message("🚫 Réservé au **Moine du Lotus**.", ephemeral=True)
-    if "passif_lotus_harmonie" not in p.competences:
-        return await interaction.response.send_message("🚫 Nécessite **Harmonie Parfaite** (P4).", ephemeral=True)
-    if p.concentre: return await interaction.response.send_message("🌸 Déjà **Concentré**.", ephemeral=True)
-    if p.effets.get("_harmonie_used"): return await interaction.response.send_message("⚠️ Déjà utilisée ce combat.", ephemeral=True)
-    if p.ferveur < 30: return await interaction.response.send_message(f"❌ 30 Ferveur requises (vous en avez {p.ferveur}).", ephemeral=True)
-    p.ferveur -= 30; p.concentre = 1
-    p.effets["_harmonie_used"] = {"duree": 9999, "valeur": 1}
-    p.sauvegarder()
-    embed = discord.Embed(title="🌸 Harmonie Parfaite", color=0x1abc9c)
-    embed.description = f"**{p.nom}** retrouve son équilibre.\n-30 Ferveur | Restante : **{p.ferveur}** | ✅ **Concentré** restauré !"
-    await log_combat(interaction, embed)
-    await interaction.response.send_message(embed=embed)
-
-
 @bot.tree.command(name="posture", description="🛡️ (Légion de Fer) Toggle Posture Défensive")
 async def posture(interaction: discord.Interaction):
     p: Personnage = Personnage.charger(interaction.user.id)
@@ -4701,18 +4334,12 @@ async def posture(interaction: discord.Interaction):
 
     p.posture_active = 1 - p.posture_active
     p.sauvegarder()
-    malus_txt = "-1 Base" if "passif_legion_implacable" in p.competences else "-3 Base"
     if p.posture_active:
         embed = discord.Embed(title="🛡️ Posture Défensive — ACTIVE", color=0x2980b9)
-        embed.description = (
-            f"**{p.nom}** adopte une posture défensive.\n"
-            f"• Robustesse ×2 | {malus_txt} en attaque\n"
-            f"• Sorts SC : coût en Tension réduit de 1\n"
-            + ("• Seuil KO : -10 PV (Muraille de Chair)\n" if "passif_legion_muraille" in p.competences else "")
-        )
+        embed.description = "Vous adoptez une posture défensive.\n• Robustesse ×2\n• -3 Dégâts en attaque (−1 si passif Implacable)\n• Seuil KO à -10 PV si Muraille de Chair"
     else:
         embed = discord.Embed(title="⚔️ Posture Défensive — Inactive", color=0x7f8c8d)
-        embed.description = "Retour en mode offensif."
+        embed.description = "Vous abandonnez la posture défensive.\n• Retour en mode offensif."
     await log_combat(interaction, embed)
     await interaction.response.send_message(embed=embed)
 
@@ -4746,24 +4373,22 @@ async def sentence(interaction: discord.Interaction, cible: str, crime: str):
     if "passif_inq_grand" in p.competences: max_sentences = 3
     elif "passif_inq_permanente" in p.competences: max_sentences = 2
     else: max_sentences = 1
-    _deja_condamne = cible_id in p.sentence_targets
-    if not _deja_condamne:
-        if len(p.sentence_targets) >= max_sentences: p.sentence_targets.pop(0)
+    if cible_id not in p.sentence_targets:
+        if len(p.sentence_targets) >= max_sentences:
+            p.sentence_targets.pop(0)  # Retire la plus ancienne
         p.sentence_targets.append(cible_id)
-    p.sentence_target_id = cible_id
+    p.sentence_target_id = cible_id  # Rétrocompat
     msg_bonus = ""
-    if _deja_condamne: msg_bonus = "\n*(Cible déjà Condamnée — Sentence confirmée.)*"
-    elif "passif_inq_balance" in p.competences:
-        p.ferveur += 15; msg_bonus = "\n⚖️ **Balance du Confesseur** : +15 Ferveur !"
+    # Passif Balance du Confesseur P4 : +15 Ferveur à chaque Sentence
+    if "passif_inq_balance" in p.competences:
+        p.ferveur += 15
+        msg_bonus = "\n⚖️ **Balance du Confesseur** : +15 Ferveur !"
     p.sauvegarder()
     embed = discord.Embed(title="📜 SENTENCE PRONONCÉE", color=0x8e44ad)
     embed.description = f"L'Inquisiteur **{p.nom}** condamne {cible_mention} !"
     embed.add_field(name="🎭 Cible", value=f"**{p_cible.nom}** (Niv {p_cible.niveau} {p_cible.classe.capitalize()})", inline=True)
     embed.add_field(name="⚖️ Crime", value=f"*{crime}*", inline=False)
-    effets_lines = ["• Sorts **Tronc Commun** contre le Condamné : **+3 Base**","• Sorts **Sous-Classe** contre le Condamné : **Armure ignorée**"]
-    if "passif_inq_permanente" in p.competences: effets_lines.append(f"• Inquisition Permanente : **{len(p.sentence_targets)}/{max_sentences}** Condamnés")
-    if "passif_inq_grand" in p.competences: effets_lines.append("• Grand Inquisiteur : 3 Condamnés max | Kill → +20 Ferveur +1 Verset *(manuel)*")
-    embed.add_field(name="Effets de la Sentence", value="\n".join(effets_lines), inline=False)
+    embed.add_field(name="Effets", value="• Tous les sorts contre le Condamné : +3 Base\n• Légère Inquisiteur : +5 Base supplémentaires\n• Execute si ≤ 30% PV", inline=False)
     if msg_bonus: embed.set_footer(text=msg_bonus.strip())
     await log_combat(interaction, embed)
     await interaction.response.send_message(embed=embed)
@@ -4830,21 +4455,12 @@ async def mj_presage(interaction: discord.Interaction, joueur: discord.Member, v
     else:
         gain = 0
 
-    msg_bonus = ""
-    if verdict.value == "exact" and "passif_oracle_memoire" in p.competences:
-        if p.effets.get("_presage_exact"): gain = 35; msg_bonus = "\n🔮 **Mémoire des Fils** : 2 Présages exacts ! **+35 Ferveur** !"
-        else: msg_bonus = "\n🔮 **Mémoire des Fils** : 1er exact. Déclarez un 2ème !"
     p.ferveur += gain
+    # Poser le flag _presage_exact pour activer les bonus conditionnels des sorts Oracle
     if verdict.value == "exact":
         p.effets["_presage_exact"] = {"duree": 1, "valeur": 1}
-        if "passif_oracle_tisserand" in p.competences:
-            p.effets["_tisserand_actif"] = {"duree": 1, "valeur": 1}
-            msg_bonus += "\n🔮 **Tisserand** : Seuil garanti sur votre prochain sort !"
-        if "passif_oracle_inevitable" in p.competences:
-            p.effets["_inevitable_actif"] = {"duree": 1, "valeur": 1}
-            msg_bonus += "\n🔮 **Inévitable** : Effets statut sans seuil !"
     else:
-        p.effets.pop("_presage_exact", None); p.effets.pop("_tisserand_actif", None); p.effets.pop("_inevitable_actif", None)
+        p.effets.pop("_presage_exact", None)
     p.sauvegarder()
 
     couleur = 0x2ecc71 if verdict.value == "exact" else (0xf39c12 if verdict.value == "partiel" else 0xe74c3c)
@@ -5259,9 +4875,7 @@ async def fiche(interaction: discord.Interaction):
         icones_effets = {
             "brulure": "🔥", "poison": "☠️", "hemorragie": "🩸",
             "gel": "❄️", "stun": "💫", "root": "🌳",
-            "hate": "⚡", "corruption": "🌑", "mode_sang": "🩸", "armure": "🛡️",
-            "toxine": "☠️", "silence": "🤫", "saignement_actif": "🩸",
-            "toxine": "☠️", "silence": "🤫", "saignement_actif": "🩸"
+            "hate": "⚡", "corruption": "🌑", "mode_sang": "🩸", "armure": "🛡️"
         }
         
         for code, data in p.effets.items():
@@ -5368,7 +4982,7 @@ async def fin_combat(interaction: discord.Interaction):
         p.effets.pop("_indestructible_used", None)
         msg += "\n🩸 **Clan du Nord** : Serment & Fureur réinitialisés."
     if "moine_lotus" in p.sous_classes_unlocked:
-        p.concentre = 1; p.effets.pop("_harmonie_used", None)
+        p.concentre = 1
         msg += "\n🌸 **Moine du Lotus** : Concentration restaurée."
     if "legion_fer" in p.sous_classes_unlocked:
         p.posture_active = 0
@@ -5381,9 +4995,6 @@ async def fin_combat(interaction: discord.Interaction):
             msg += "\n🎯 **Loge de l'Ombre** : Désignation levée."
         else:
             msg += "\n🎯 **Loge de l'Ombre** : Désignation maintenue (Œil de la Confrérie)."
-    if "oracle" in p.sous_classes_unlocked:
-        p.effets.pop("_vision_used", None); p.effets.pop("_presage_exact", None)
-        p.effets.pop("_tisserand_actif", None); p.effets.pop("_inevitable_actif", None)
     if "inquisiteur" in p.sous_classes_unlocked:
         p.sentence_target_id = 0; p.sentence_targets = []
         p.effets.pop("_indestructible_used", None)
@@ -6307,11 +5918,10 @@ async def gm_freestyle(
     
     reload_data()
     
-    # 4. Ajout direct à la fiche du monstre incarné (si le MJ en a une)
+    # 4. Ajout direct à la fiche du monstre incarné
     p: Personnage = Personnage.charger(interaction.user.id)
-    if p:
-        p.competences.append(unique_id)
-        p.sauvegarder()
+    p.competences.append(unique_id)
+    p.sauvegarder()
 
     # 5. Affichage
     embed = discord.Embed(title="⚡ Compétence Créée & Équipée !", color=0xE67E22)
@@ -6382,9 +5992,7 @@ async def gm_incarner(interaction: discord.Interaction, nom: str):
         
         # On charge pour confirmer
         p = Personnage.charger(user_id)
-        nom_p = p.nom if p else nom
-        classe_p = p.classe if p else "?"
-        await interaction.response.send_message(f"🎭 Vous incarnez maintenant **{nom_p}** ({classe_p}).")
+        await interaction.response.send_message(f"🎭 Vous incarnez maintenant **{p.nom}** ({p.classe}).")
     else:
         conn.close()
         await interaction.response.send_message(f"❌ Le personnage **{nom}** n'existe pas.\nUtilisez `/gm_creer` pour le fabriquer.", ephemeral=True)
@@ -7182,9 +6790,42 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 
 
 #-------------------------------------------------------------------------------------------------------------------------------------------
+# --- COMMANDE BACKUP ---
+#-------------------------------------------------------------------------------------------------------------------------------------------
+
+@bot.tree.command(name="gm_backup", description="(GM) Exporter toutes les données joueurs en JSON")
+async def gm_backup(interaction: discord.Interaction):
+    if not is_gm(interaction.user.id):
+        return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+
+    await interaction.response.defer(ephemeral=True)
+
+    conn = get_db_connection()
+    joueurs = conn.execute("SELECT * FROM joueurs").fetchall()
+    inventaire = conn.execute("SELECT * FROM inventaire").fetchall()
+    sessions = conn.execute("SELECT * FROM sessions").fetchall()
+    conn.close()
+
+    data = {
+        "date": discord.utils.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        "joueurs": [dict(j) for j in joueurs],
+        "inventaire": [dict(i) for i in inventaire],
+        "sessions": [dict(s) for s in sessions],
+    }
+
+    json_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    file = discord.File(fp=__import__("io").BytesIO(json_bytes), filename=f"backup_{discord.utils.utcnow().strftime('%Y%m%d_%H%M')}.json")
+
+    await interaction.followup.send(
+        f"✅ Backup exporté — **{len(data['joueurs'])}** personnages, **{len(data['inventaire'])}** items.",
+        file=file,
+        ephemeral=True
+    )
+
+#-------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    webserver.keep_alive()  
+    # webserver.keep_alive()  # Décommenter si hébergé sur Replit
     if token:
         bot.run(token, log_handler=handler, log_level=logging.DEBUG)
     else:
