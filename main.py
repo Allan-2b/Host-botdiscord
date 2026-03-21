@@ -157,6 +157,8 @@ def init_db():
     except sqlite3.OperationalError: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN passe_count INTEGER DEFAULT 0")
     except sqlite3.OperationalError: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN badges TEXT DEFAULT '[]'")
+    except sqlite3.OperationalError: pass
 
     conn.commit()
     conn.close()
@@ -1135,6 +1137,7 @@ class Personnage:
         self.sentence_target_id = 0
         self.sentence_targets = []  # Liste des cibles Condamnées (P3: max 2, P5: max 3)
         self.passe_count = 0        # Nb de Passes jouées ce tour (Art de l'Estoc Maîtrisé P5)
+        self.badges = []            # Titres et récompenses RP accordés par le MJ
         # ── Flags temporaires (non persistés en DB) ──
         self._ignore_armor = False
         self._ignore_rob   = False
@@ -1206,9 +1209,9 @@ class Personnage:
              festin, charges_elementaires,
              passe_active, parade_absorb, last_action_type, fureur_tribale_used,
              concentre, serment_actif, serment_bonus, posture_active,
-             designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count)
+             designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
               self.tension, self.ferveur, self.versets, 
@@ -1222,7 +1225,8 @@ class Personnage:
               self.monnaie, self.robustesse, self.festin, charges_json,
               self.passe_active, self.parade_absorb, self.last_action_type, self.fureur_tribale_used,
               self.concentre, self.serment_actif, self.serment_bonus, self.posture_active,
-              self.designation_target_id, self.designation_stacks, self.sentence_target_id, json.dumps(self.sentence_targets), self.passe_count))
+              self.designation_target_id, self.designation_stacks, self.sentence_target_id, json.dumps(self.sentence_targets), self.passe_count,
+              json.dumps(self.badges)))
         
         conn.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (self.user_id, self.nom))
         conn.commit()
@@ -1280,6 +1284,8 @@ class Personnage:
         except (json.JSONDecodeError, TypeError):
             p.sentence_targets = [p.sentence_target_id] if p.sentence_target_id else []
         p.passe_count = row['passe_count'] if 'passe_count' in row.keys() else 0
+        try: p.badges = json.loads(row['badges']) if 'badges' in row.keys() and row['badges'] else []
+        except (json.JSONDecodeError, TypeError): p.badges = []
 
         p.charger_equipement()
         return p
@@ -4865,6 +4871,11 @@ async def fiche(interaction: discord.Interaction):
         if cds_txt:
             embed.add_field(name="⏳ Sorts en Recharge", value="\n".join(cds_txt), inline=False)
 
+    # --- J. BADGES RP ---
+    if p.badges:
+        badges_txt = " • ".join([f"🏅 {b}" for b in p.badges])
+        embed.add_field(name="🏅 Titres & Distinctions", value=badges_txt, inline=False)
+
     # --- FOOTER ---
     total_pts = p.points_stat + p.points_attribut + p.points_comp
     txt_footer = f"Niveau {p.niveau} • {total_pts} points à dépenser"
@@ -6788,6 +6799,56 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 
 
 
+
+#-------------------------------------------------------------------------------------------------------------------------------------------
+# --- COMMANDES BADGES ---
+#-------------------------------------------------------------------------------------------------------------------------------------------
+
+@bot.tree.command(name="gm_badge_ajouter", description="(GM) Donner un badge / titre à un joueur")
+@app_commands.describe(joueur="Le joueur à récompenser", badge="Le titre à lui attribuer (ex: Sauveur de Einsber)")
+async def gm_badge_ajouter(interaction: discord.Interaction, joueur: discord.Member, badge: str):
+    if not is_gm(interaction.user.id):
+        return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+
+    p = Personnage.charger(joueur.id)
+    if not p:
+        return await interaction.response.send_message("❌ Ce joueur n'a pas de fiche.", ephemeral=True)
+
+    if badge in p.badges:
+        return await interaction.response.send_message(f"⚠️ **{p.nom}** possède déjà le titre **{badge}**.", ephemeral=True)
+
+    p.badges.append(badge)
+    p.sauvegarder()
+
+    embed = discord.Embed(title="🏅 Nouveau Titre !", color=0xF1C40F)
+    embed.description = f"**{p.nom}** reçoit le titre :\n## 🏅 {badge}"
+    embed.set_footer(text=f"Attribué par le MJ • Total : {len(p.badges)} titre(s)")
+    await interaction.response.send_message(content=joueur.mention, embed=embed)
+
+
+@bot.tree.command(name="gm_badge_retirer", description="(GM) Retirer un badge / titre d'un joueur")
+@app_commands.describe(joueur="Le joueur ciblé", badge="Le titre à retirer (doit être exact)")
+async def gm_badge_retirer(interaction: discord.Interaction, joueur: discord.Member, badge: str):
+    if not is_gm(interaction.user.id):
+        return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+
+    p = Personnage.charger(joueur.id)
+    if not p:
+        return await interaction.response.send_message("❌ Ce joueur n'a pas de fiche.", ephemeral=True)
+
+    if badge not in p.badges:
+        titres = "\n".join(p.badges) if p.badges else "*Aucun*"
+        return await interaction.response.send_message(
+            f"❌ Titre **{badge}** introuvable sur **{p.nom}**.\nTitres actuels :\n{titres}",
+            ephemeral=True
+        )
+
+    p.badges.remove(badge)
+    p.sauvegarder()
+
+    embed = discord.Embed(title="🗑️ Titre Retiré", color=0x95a5a6)
+    embed.description = f"Le titre **{badge}** a été retiré de **{p.nom}**."
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 #-------------------------------------------------------------------------------------------------------------------------------------------
 # --- COMMANDE BACKUP ---
