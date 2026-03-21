@@ -27,7 +27,7 @@ import webserver
 
 load_dotenv()
 token = os.getenv('DISCORD_TOKEN')
-handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
+handler = logging.FileHandler(filename='/data/discord.log', encoding='utf-8', mode='w')
 intents = discord.Intents.all()
 
 # --- IDs des Game Masters (doit être défini AVANT la création du bot) ---
@@ -69,7 +69,7 @@ PENDING_CLASHES = {}
 LAST_ATTACKER = {}  # {defender_user_id: attacker_user_id} — pour Distorsion Permanente
 
 def get_db_connection():
-    conn = sqlite3.connect('frieren_jdr.db')
+    conn = sqlite3.connect('/data/frieren_jdr.db')
     conn.row_factory = sqlite3.Row
     return conn
 
