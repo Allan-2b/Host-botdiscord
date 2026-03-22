@@ -2871,6 +2871,11 @@ async def tour(interaction: discord.Interaction):
     val_effets = "\n".join(rapport_effets) if rapport_effets else "*Aucun effet.*"
     embed.add_field(name="🧬 Statut", value=val_effets, inline=False)
 
+    # --- BADGES ---
+    if p.badges:
+        badges_txt = " • ".join([f"🏅 {b}" for b in p.badges])
+        embed.add_field(name="🏅 Titres", value=badges_txt, inline=False)
+
     if skip_turn:
         embed.add_field(name="🚫 STOP", value="**Tour passé !**", inline=False)
     else:
@@ -3309,6 +3314,14 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         if "legion_fer" in p_defenseur.sous_classes_unlocked and p_defenseur.posture_active:
             malus_p = 1 if "passif_legion_implacable" in p_defenseur.competences else 3
             tot_b -= malus_p; vis_b.append(f"🛡️(-{malus_p} Posture)")
+
+        # --- Drakéide : +1 dégât par palier de 3 niveaux ---
+        drake_a = p_attaquant.niveau // 3
+        if p_attaquant.race == "Drakéide" and drake_a > 0:
+            tot_a += drake_a; vis_a.append(f"🐲+{drake_a}(Drakéide)")
+        drake_b = p_defenseur.niveau // 3
+        if p_defenseur.race == "Drakéide" and drake_b > 0:
+            tot_b += drake_b; vis_b.append(f"🐲+{drake_b}(Drakéide)")
         fp_a = False; fp_b = False  # Ne s'applique qu'au premier round
         
         # --- RÉSONANCE DIVINE (DANS LE CLASH) ---
@@ -3391,9 +3404,26 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
             if msg_v: bonus_txt += f"\n{msg_v}"
 
         # --- BONUS RACIAUX & EFFETS ---
-        if vainqueur.race == "Drakéide" and vainqueur.niveau >= 3:
-            damage_final += (vainqueur.niveau // 3)
-            bonus_txt += f" + {vainqueur.niveau // 3} (Drakéide)"
+        if vainqueur.race == "Drakéide":
+            drake_bonus = vainqueur.niveau // 3
+            if drake_bonus > 0:
+                damage_final += drake_bonus
+                bonus_txt += f" 🐲+{drake_bonus}(Drakéide)"
+
+        # --- MOINE DU LOTUS : +4 Base si Perturbé | +2 Base si Éveil P5 ---
+        if "moine_lotus" in vainqueur.sous_classes_unlocked:
+            if "passif_lotus_eveil" in vainqueur.competences:
+                damage_final += 2
+                bonus_txt += " +2(Éveil)"
+            elif not vainqueur.concentre:
+                damage_final += 4
+                bonus_txt += " 🔥+4(Perturbé)"
+
+        # --- LÉGION DE FER : -3 Base en Posture (-1 si Implacable P4) ---
+        if "legion_fer" in vainqueur.sous_classes_unlocked and vainqueur.posture_active:
+            malus_p = 1 if "passif_legion_implacable" in vainqueur.competences else 3
+            damage_final -= malus_p
+            bonus_txt += f" 🛡️(-{malus_p} Posture)"
         
         if hasattr(vainqueur, "vampire_boost") and vainqueur.vampire_boost > 0:
             damage_final += vainqueur.vampire_boost
