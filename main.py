@@ -6914,6 +6914,132 @@ async def gm_backup(interaction: discord.Interaction):
     )
 
 #-------------------------------------------------------------------------------------------------------------------------------------------
+# --- COMMANDE RESTORE ---
+#-------------------------------------------------------------------------------------------------------------------------------------------
+
+@bot.tree.command(name="gm_restore", description="(GM) Restaurer les données depuis un fichier backup JSON")
+async def gm_restore(interaction: discord.Interaction):
+    if not is_gm(interaction.user.id):
+        return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+
+    await interaction.response.send_message(
+        "📂 **Envoyez le fichier backup `.json`** en réponse à ce message dans les 60 secondes.",
+        ephemeral=True
+    )
+
+    def check(m):
+        return (
+            m.author.id == interaction.user.id
+            and m.channel.id == interaction.channel_id
+            and m.attachments
+            and m.attachments[0].filename.endswith(".json")
+        )
+
+    try:
+        msg = await interaction.client.wait_for("message", check=check, timeout=60.0)
+    except asyncio.TimeoutError:
+        return await interaction.followup.send("⏰ Temps écoulé. Restore annulé.", ephemeral=True)
+
+    # Télécharger le fichier
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(msg.attachments[0].url) as resp:
+                raw = await resp.read()
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as e:
+        return await interaction.followup.send(f"❌ Impossible de lire le fichier : {e}", ephemeral=True)
+
+    joueurs_data = data.get("joueurs", [])
+    inventaire_data = data.get("inventaire", [])
+    sessions_data = data.get("sessions", [])
+
+    if not joueurs_data:
+        return await interaction.followup.send("❌ Aucune donnée joueur trouvée dans le fichier.", ephemeral=True)
+
+    conn = get_db_connection()
+    nb_joueurs = 0
+    nb_inventaire = 0
+    nb_sessions = 0
+    erreurs = []
+
+    try:
+        # Colonnes connues de la table joueurs
+        colonnes_joueurs = [
+            "user_id", "nom", "classe", "race", "niveau", "pv_actuel", "pv_max",
+            "mana", "mana_max", "tension", "ferveur", "versets",
+            "phy", "const", "agi", "esp", "int_stat", "foi", "sag",
+            "points_stat", "points_comp", "points_attribut", "competences",
+            "oral", "force_rp", "survie", "histoire", "sciences", "medecine",
+            "religion", "discretion", "acrobatie",
+            "alias", "description", "image_url",
+            "mode_entrainement", "snapshot_entrainement", "sous_classes_unlocked",
+            "effets", "cooldowns", "monnaie", "robustesse", "festin",
+            "charges_elementaires", "passe_active", "parade_absorb",
+            "last_action_type", "fureur_tribale_used", "concentre",
+            "serment_actif", "serment_bonus", "posture_active",
+            "designation_target_id", "designation_stacks",
+            "sentence_target_id", "sentence_targets", "passe_count", "badges"
+        ]
+
+        for j in joueurs_data:
+            try:
+                # Ne garder que les colonnes qu'on connaît
+                row = {k: j[k] for k in colonnes_joueurs if k in j}
+                # Valeurs par défaut pour colonnes manquantes
+                row.setdefault("badges", "[]")
+                row.setdefault("passe_count", 0)
+                row.setdefault("sentence_targets", "[]")
+
+                cols = ", ".join(row.keys())
+                placeholders = ", ".join(["?"] * len(row))
+                conn.execute(
+                    f"INSERT OR REPLACE INTO joueurs ({cols}) VALUES ({placeholders})",
+                    list(row.values())
+                )
+                nb_joueurs += 1
+            except Exception as e:
+                erreurs.append(f"Joueur {j.get('nom', '?')} : {e}")
+
+        for inv in inventaire_data:
+            try:
+                conn.execute(
+                    "INSERT OR IGNORE INTO inventaire (user_id, item_ref, equipe) VALUES (?, ?, ?)",
+                    (inv["user_id"], inv["item_ref"], inv.get("equipe", 0))
+                )
+                nb_inventaire += 1
+            except Exception as e:
+                erreurs.append(f"Inventaire : {e}")
+
+        for s in sessions_data:
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO sessions (user_id, nom_perso_actif) VALUES (?, ?)",
+                    (s["user_id"], s["nom_perso_actif"])
+                )
+                nb_sessions += 1
+            except Exception as e:
+                erreurs.append(f"Session : {e}")
+
+        conn.commit()
+    except Exception as e:
+        conn.close()
+        return await interaction.followup.send(f"❌ Erreur critique : {e}", ephemeral=True)
+    finally:
+        conn.close()
+
+    msg_erreurs = f"\n⚠️ {len(erreurs)} erreur(s) :\n" + "\n".join(erreurs[:5]) if erreurs else ""
+    embed = discord.Embed(title="✅ Restore Terminé", color=0x2ecc71)
+    embed.description = (
+        f"**{nb_joueurs}** personnages restaurés\n"
+        f"**{nb_inventaire}** items restaurés\n"
+        f"**{nb_sessions}** sessions restaurées"
+        f"{msg_erreurs}"
+    )
+    embed.set_footer(text=f"Depuis : {data.get('date', 'inconnu')}")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+#-------------------------------------------------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
     # webserver.keep_alive()  # Décommenter si hébergé sur Replit
