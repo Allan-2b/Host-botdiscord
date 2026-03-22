@@ -68,7 +68,7 @@ PENDING_CLASHES = {}
 LAST_ATTACKER = {}  # {defender_user_id: attacker_user_id} — pour Distorsion Permanente
 
 def get_db_connection():
-    conn = sqlite3.connect('frieren_jdr.db')
+    conn = sqlite3.connect('/data/frieren_jdr.db')
     conn.row_factory = sqlite3.Row
     return conn
 
