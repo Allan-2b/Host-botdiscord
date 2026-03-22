@@ -32,6 +32,16 @@ intents = discord.Intents.all()
 # --- IDs des Game Masters (doit être défini AVANT la création du bot) ---
 GM_IDS = [264667357631348749, 461067793677287434]
 
+# --- Salons privés Pigeon Voyageur (joueur_id → salon_id) ---
+PIGEON_CHANNELS = {
+    762271064444895232:  1485319361307873300,
+    302429969869701120:  1485319419608563814,
+    265428087628365825:  1485319481470226462,
+    477881115982430209:  1485319529218314321,
+    465623001178832907:  1485319717563400343,
+    505813139837943809:  1485319781195448471,
+}
+
 def is_gm(user_id: int) -> bool:
     """Vérifie si un utilisateur est Game Master."""
     return user_id in GM_IDS
@@ -4619,30 +4629,61 @@ async def echauffement(interaction: discord.Interaction):
 async def pigeon(interaction: discord.Interaction, joueur: discord.Member, message: str):
     p_expediteur: Personnage = Personnage.charger(interaction.user.id)
     nom_expediteur = p_expediteur.nom if p_expediteur else interaction.user.display_name
-    
-    # Réponse immédiate pour confirmer le départ
+
     embed_depart = discord.Embed(title="🐦 Pigeon envoyé", color=0x2ecc71)
     embed_depart.description = f"Votre message pour **{joueur.display_name}** a été confié à un pigeon voyageur.\n*Durée estimée : 30 minutes.*"
     await interaction.response.send_message(embed=embed_depart, ephemeral=True)
 
-    # La tâche de fond (Le voyage)
     async def voyage_du_pigeon():
-        await asyncio.sleep(1800) # 1800 secondes = 30 minutes
-        
-        # Création de la lettre reçue
+        await asyncio.sleep(1800)
+
+        # Embed destinataire
         embed_recu = discord.Embed(title="📩 Courrier Reçu", color=0xf1c40f)
         embed_recu.set_author(name=f"De : {nom_expediteur}", icon_url=interaction.user.display_avatar.url)
         embed_recu.description = f"📜 *Une lettre arrive pour vous...*\n\n**« {message} »**"
         embed_recu.set_footer(text="Ce message a voyagé 30 minutes.")
-        
-        try:
-            # On essaie d'envoyer en MP (DM)
-            await joueur.send(embed=embed_recu)
-        except discord.Forbidden:
-            # Si les MP sont fermés, on essaie de notifier dans le channel d'origine (optionnel)
-            pass
 
-    # Lancement de la tâche sans bloquer le bot
+        # --- Envoi au destinataire dans son salon privé ---
+        salon_id = PIGEON_CHANNELS.get(joueur.id)
+        envoye = False
+        if salon_id:
+            salon = interaction.client.get_channel(salon_id)
+            if salon:
+                await salon.send(content=joueur.mention, embed=embed_recu)
+                envoye = True
+        # Fallback MP si pas de salon configuré
+        if not envoye:
+            try:
+                await joueur.send(embed=embed_recu)
+            except discord.Forbidden:
+                try:
+                    await interaction.channel.send(content=joueur.mention, embed=embed_recu)
+                except Exception:
+                    pass
+
+        # --- Copie aux MJs ---
+        embed_mj = discord.Embed(title="📬 Copie MJ — Pigeon Voyageur", color=0x95a5a6)
+        embed_mj.description = (
+            f"**De :** {nom_expediteur} ({interaction.user.mention})\n"
+            f"**À :** {joueur.display_name} ({joueur.mention})\n\n"
+            f"**« {message} »**"
+        )
+        embed_mj.set_footer(text="Copie automatique pour les MJs")
+
+        for gm_id in GM_IDS:
+            gm_salon_id = PIGEON_CHANNELS.get(gm_id)
+            if gm_salon_id:
+                gm_salon = interaction.client.get_channel(gm_salon_id)
+                if gm_salon:
+                    await gm_salon.send(embed=embed_mj)
+                    continue
+            try:
+                gm_member = interaction.guild.get_member(gm_id)
+                if gm_member:
+                    await gm_member.send(embed=embed_mj)
+            except discord.Forbidden:
+                pass
+
     asyncio.create_task(voyage_du_pigeon())
 
 
