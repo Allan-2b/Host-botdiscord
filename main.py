@@ -1506,7 +1506,7 @@ async def action_bonus_autocomplete(interaction: discord.Interaction, current: s
         if key not in p.competences: continue
         
         if current.lower() in val['nom'].lower():
-            choix.append(app_commands.Choice(name=f"⚡ {val['nom']}", value=key.strip().lower()))
+            choix.append(app_commands.Choice(name=f"⚡ {val['nom']}", value=key))
             
     return choix[:25]
 
@@ -1530,6 +1530,25 @@ async def classe_autocomplete(interaction: discord.Interaction, current: str):
 async def stat_autocomplete(interaction: discord.Interaction, current: str):
     stats = {"phy": "Physique", "esp": "Esprit", "agi": "Agilité", "foi": "Foi", "int_stat": "Intelligence", "sag": "Sagesse", "const": "Constitution"}
     return [app_commands.Choice(name=nom, value=code) for code, nom in stats.items() if current.lower() in nom.lower()]
+
+
+def resolve_sort_ref(sort: str) -> str:
+    """Résout une ref de sort : accepte la ref directe OU le nom affiché (mobile).
+    Retourne la ref normalisée si trouvée, sinon la valeur originale."""
+    # Normaliser d'abord
+    sort_clean = sort.strip().lower()
+    # 1. Chercher par ref directe
+    if sort_clean in SKILLS_DB:
+        return sort_clean
+    # 2. Chercher par nom (cas mobile où l'autocomplétion envoie le nom)
+    for key, val in SKILLS_DB.items():
+        if val['nom'].lower() == sort_clean:
+            return key
+        # Sans les préfixes emoji (⚡, 👹, etc.)
+        nom_clean = val['nom'].lower().strip()
+        if nom_clean == sort_clean:
+            return key
+    return sort_clean  # Retourne tel quel si non trouvé
 
 
 
@@ -2380,9 +2399,7 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     if "no_bonus_action" in p.effets:
         return await interaction.followup.send("🎯 **Paralysie Neurale** : Vous ne pouvez pas utiliser d'Action Bonus ce tour !", ephemeral=True)
 
-    # Normaliser la ref (enlève espaces invisibles, met en minuscules)
-    sort = sort.strip().lower()
-
+    sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data = SKILLS_DB[sort]
 
@@ -2920,6 +2937,7 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Me
     else:
         p_cible = Personnage.charger(cible.id)
     if not p_cible: return await interaction.response.send_message("❌ Cible invalide.", ephemeral=True)
+    sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.response.send_message("❌ Sort introuvable.", ephemeral=True)
     
     skill_data = SKILLS_DB[sort]
@@ -3057,6 +3075,7 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
     if cible.id == interaction.user.id: return await interaction.followup.send("❌ Cible invalide.", ephemeral=True)
     if cible.id in PENDING_CLASHES: return await interaction.followup.send(f"❌ Déjà défié.", ephemeral=True)
     
+    sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data = SKILLS_DB[sort]
 
@@ -3177,8 +3196,9 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
     if p_defenseur.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
     if "stun" in p_defenseur.effets: return await interaction.followup.send("💫 **Étourdi !** Impossible de riposter.", ephemeral=True)
     
+    sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: 
-        PENDING_CLASHES[user_id] = clash_data 
+        PENDING_CLASHES[clash_key] = clash_data 
         return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data_b = SKILLS_DB[sort]
     if skill_data_b.get('type') == 'soin': return await interaction.followup.send(f"🚫 Impossible avec un soin.", ephemeral=True)
@@ -3564,6 +3584,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
     if "stun" in p.effets: return await interaction.followup.send("💫 **Étourdi !**", ephemeral=True)
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !**", ephemeral=True)
 
+    sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data = SKILLS_DB[sort]
     
