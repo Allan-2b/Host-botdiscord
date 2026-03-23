@@ -1506,7 +1506,7 @@ async def action_bonus_autocomplete(interaction: discord.Interaction, current: s
         if key not in p.competences: continue
         
         if current.lower() in val['nom'].lower():
-            choix.append(app_commands.Choice(name=f"⚡ {val['nom']}", value=key))
+            choix.append(app_commands.Choice(name=f"⚡ {val['nom']}", value=key.strip().lower()))
             
     return choix[:25]
 
@@ -2380,6 +2380,9 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     if "no_bonus_action" in p.effets:
         return await interaction.followup.send("🎯 **Paralysie Neurale** : Vous ne pouvez pas utiliser d'Action Bonus ce tour !", ephemeral=True)
 
+    # Normaliser la ref (enlève espaces invisibles, met en minuscules)
+    sort = sort.strip().lower()
+
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data = SKILLS_DB[sort]
 
@@ -3052,7 +3055,7 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
     if "gel" in p_attaquant.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible de bouger.", ephemeral=True)
 
     if cible.id == interaction.user.id: return await interaction.followup.send("❌ Cible invalide.", ephemeral=True)
-    if (interaction.user.id, cible.id) in PENDING_CLASHES: return await interaction.followup.send(f"❌ Vous avez déjà un clash en attente contre cette cible.", ephemeral=True)
+    if cible.id in PENDING_CLASHES: return await interaction.followup.send(f"❌ Déjà défié.", ephemeral=True)
     
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data = SKILLS_DB[sort]
@@ -3137,14 +3140,14 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
     if _flag_ma_clash:
         skill_obj.coins += _flag_ma_clash.get("valeur", 1)
 
-    PENDING_CLASHES[(interaction.user.id, cible.id)] = {
+    PENDING_CLASHES[cible.id] = {
         'attaquant_id': interaction.user.id,
         'skill_a': skill_obj,
         'desc_a': description,
         'p_attaquant': p_attaquant,
         'cibles_sec_a': cibles_secondaires, 
         'ref_a': sort,
-        'sort_data_a': skill_data
+        'sort_data_a': skill_data  # Store pour appliquer festin/résonance dans riposte
     }
 
     embed = discord.Embed(title="⚔️ CLASH INITIÉ !", description=f"**{p_attaquant.nom}** provoque **{cible.display_name}** !", color=0xE67E22)
@@ -3163,27 +3166,19 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
 async def riposte(interaction: discord.Interaction, sort: str, description: str, cibles_secondaires: str = None):
     await interaction.response.defer()
     user_id = interaction.user.id
-
-    # Chercher un clash en attente où CE joueur est le défenseur
-    clash_key = next((k for k in PENDING_CLASHES if k[1] == user_id), None)
-    if clash_key is None:
-        return await interaction.followup.send("❌ Personne ne vous a défié.", ephemeral=True)
-
-    clash_data = PENDING_CLASHES.pop(clash_key)
+    if user_id not in PENDING_CLASHES: return await interaction.followup.send("❌ Personne ne vous a défié.", ephemeral=True)
+    
+    clash_data = PENDING_CLASHES.pop(user_id)
     p_defenseur: Personnage = Personnage.charger(user_id)
-    # Recharger p_attaquant depuis la DB pour avoir son état actuel (même si le MJ a changé de perso)
-    p_attaquant: Personnage = Personnage.charger(clash_data['attaquant_id'])
-    if not p_attaquant:
-        return await interaction.followup.send("❌ L'attaquant n'a plus de fiche active.", ephemeral=True)
-    skill_a_org: Skill = clash_data['skill_a']
-    desc_b = description  # Description RP du riposteur
+    p_attaquant: Personnage = clash_data['p_attaquant'] # <-- Maintenant il sait !
+    skill_a_org: Skill = clash_data['skill_a'] # Ton éditeur saura que c'est une technique !
 
     # --- VÉRIFICATIONS DÉFENSEUR ---
     if p_defenseur.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
     if "stun" in p_defenseur.effets: return await interaction.followup.send("💫 **Étourdi !** Impossible de riposter.", ephemeral=True)
     
     if sort not in SKILLS_DB: 
-        PENDING_CLASHES[clash_key] = clash_data 
+        PENDING_CLASHES[user_id] = clash_data 
         return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data_b = SKILLS_DB[sort]
     if skill_data_b.get('type') == 'soin': return await interaction.followup.send(f"🚫 Impossible avec un soin.", ephemeral=True)
@@ -3215,14 +3210,14 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
             
         # 4. Échec
         else:
-            PENDING_CLASHES[clash_key] = clash_data 
+            PENDING_CLASHES[user_id] = clash_data 
             return await interaction.followup.send(f"❌ Pas assez de {cout_type}.", ephemeral=True)
         
 
     cout_versets = skill_data_b.get("versets", 0)
     if cout_versets > 0:
         if p_defenseur.versets < cout_versets:
-            PENDING_CLASHES[clash_key] = clash_data # On remet le clash en attente si ça rate
+            PENDING_CLASHES[user_id] = clash_data # On remet le clash en attente si ça rate
             return await interaction.followup.send(f"❌ **Foi insuffisante !**\nCe miracle nécessite **{cout_versets} Versets** (Vous en avez {p_defenseur.versets}).", ephemeral=True)
         p_defenseur.versets -= cout_versets
 
@@ -3264,7 +3259,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
     if "titanenblut" in p_defenseur.effets:
         skill_b_org.coins += 1
 
-    await interaction.followup.send(f"⚔️ **Le Clash commence !**\n🔴 **{p_attaquant.nom}** : *« {clash_data['desc_a']} »*\n🔵 **{p_defenseur.nom}** : *« {desc_b} »*{msg_hemo}")
+    await interaction.followup.send(f"⚔️ **Le Clash commence !**\n🔴 **{p_attaquant.nom}** vs 🔵 **{p_defenseur.nom}**{msg_hemo}")
 
 # --- CALCUL DES MALUS ET BONUS ---
     # Poison : (5 + lvl) // 5
