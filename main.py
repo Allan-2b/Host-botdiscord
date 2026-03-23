@@ -5034,9 +5034,12 @@ async def creation(interaction: discord.Interaction, nom: str, classe: app_comma
         # Dans la commande creation :
         # Sort de base
         skill_base = ""
-        if  p.classe == "guerrier": skill_base = "frappe_novice" 
+        if  p.classe == "guerrier": skill_base = "frappe_lourde_novice"
         elif p.classe == "mage": skill_base = "zooltrak_novice"  # 
-        else: skill_base = "lumiere_divine" 
+        else: skill_base = "lumiere_divine"
+        # Fallback si la ref exacte n'existe pas en DB
+        if skill_base not in SKILLS_DB:
+            skill_base = resolve_sort_ref(skill_base)
         if skill_base in SKILLS_DB: p.competences.append(skill_base); p.sauvegarder()
         
         embed = discord.Embed(title="✨ Personnage Créé !", color=0x2ecc71)
