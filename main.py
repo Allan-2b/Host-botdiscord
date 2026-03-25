@@ -3989,7 +3989,7 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
     # --- B. ESQUIVE ---
     if type_def.value == "esquive":
         # Gestion Enracinement (Agilité = 0)
-        coins_agi = max(1, p.agi // 2)
+        coins_agi = max(1, p.agi)
         msg_root = ""
         if "root" in p.effets:
             coins_agi = 0
@@ -4239,7 +4239,13 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
                 p_atq.sauvegarder()
                 msg_distorsion = f"\n⚫ **Distorsion Permanente** : {p_atq.nom} reçoit 1 Lestage en vous attaquant !"
 
-    txt_bilan = f"Dégâts reçus: **{degats_finaux}**\nPV Restants: {p.pv_actuel}/{p.pv_max}{msg_gain}"
+    pv_pct = p.pv_actuel / p.pv_max if p.pv_max > 0 else 0
+    if pv_pct > 0.75:    pv_etat = "🟩 En forme"
+    elif pv_pct > 0.50:  pv_etat = "🟨 Légèrement blessé"
+    elif pv_pct > 0.25:  pv_etat = "🟧 Sérieusement blessé"
+    elif pv_pct > 0:     pv_etat = "🟥 État critique"
+    else:                pv_etat = "💀 K.O."
+    txt_bilan = f"Dégâts reçus: **{degats_finaux}**\nÉtat: {pv_etat}{msg_gain}"
     embed.add_field(name="Bilan", value=txt_bilan + msg_ko + msg_v4_def + msg_rebond + msg_distorsion + msg_aura, inline=False)
     if msg_ko: embed.color = 0x000000
         
@@ -5323,7 +5329,7 @@ async def jet_attributs(interaction: discord.Interaction, attribut: app_commands
     if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
     # Récupération de la valeur (ex: 3)
     valeur_attr = getattr(p, attribut.value, 0)
-    bonus = valeur_attr * 4
+    bonus = valeur_attr * 7
     lancer = random.randint(1, 100)
     total = lancer + bonus
     reussite = total >= difficulte
