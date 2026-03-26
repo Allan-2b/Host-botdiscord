@@ -1369,6 +1369,9 @@ class Personnage:
                 self.effets[code]["valeur"] = max(self.effets[code]["valeur"], puissance)
         else:
             self.effets[code] = {"duree": duree, "valeur": puissance}
+            # Le stun ne prend effet qu'au tour SUIVANT celui où il est appliqué.
+            if code == "stun":
+                self.effets[code]["nouveau"] = True
         
         if code == "brulure":
              self.effets[code]["valeur"] = self.effets[code]["duree"]
@@ -1614,6 +1617,20 @@ async def tour_noms_autocomplete(interaction: discord.Interaction, current: str)
             name=f"{r['nom']} (Niv {r['niveau']} {r['classe'].capitalize()})",
             value=f"{r['user_id']}:{r['nom']}"
         )
+        for r in rows
+    ][:25]
+
+async def joueur_perso_autocomplete(interaction: discord.Interaction, current: str):
+    """Autocomplete listant toutes les fiches du joueur (pour les commandes de combat multi-perso MJ)."""
+    user_id = interaction.user.id
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT nom, classe, niveau FROM joueurs WHERE user_id = ? AND nom LIKE ? ORDER BY nom",
+        (user_id, f"%{current}%")
+    ).fetchall()
+    conn.close()
+    return [
+        app_commands.Choice(name=f"{r['nom']} (Niv {r['niveau']} {r['classe'].capitalize()})", value=r['nom'])
         for r in rows
     ][:25]
 
@@ -2462,6 +2479,12 @@ def appliquer_cooldown(personnage: Personnage, sort_ref: str):
         if cd > 0:
             personnage.cooldowns[sort_ref] = cd
 
+def is_stun_actif(p) -> bool:
+    """Retourne True si le stun bloque les actions (flag nouveau=False = tour suivant l'application)."""
+    if "stun" not in p.effets:
+        return False
+    return not p.effets["stun"].get("nouveau", False)
+
 @bot.tree.command(name="action_bonus", description="⚡ Action rapide (Buff personnel, Soin, Drain)")
 @app_commands.describe(sort="La compétence à utiliser", description="Description RP", cible="[Optionnel] Ennemi pour les sorts de Drain", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
 @app_commands.autocomplete(sort=action_bonus_autocomplete, personnage=joueur_perso_autocomplete)
@@ -2479,7 +2502,7 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     dispo, msg_err = verifier_cooldown(p, sort)
     if not dispo: return await interaction.followup.send(msg_err, ephemeral=True)
 
-    if "stun" in p.effets: return await interaction.followup.send("💫 **Étourdi !** Impossible d'agir.", ephemeral=True)
+    if is_stun_actif(p): return await interaction.followup.send("💫 **Étourdi !** Impossible d'agir.", ephemeral=True)
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible d'agir.", ephemeral=True)
     if "no_bonus_action" in p.effets:
         return await interaction.followup.send("🎯 **Paralysie Neurale** : Vous ne pouvez pas utiliser d'Action Bonus ce tour !", ephemeral=True)
@@ -2768,10 +2791,15 @@ async def tour(interaction: discord.Interaction, perso1: str = None, perso2: str
 
             # --- 6. CONTRÔLES ---
             elif code in ["stun", "gel"]:
-                skip_turn = True
-                nom_etat = "Gelé" if code == "gel" else "Étourdi"
-                detail = "(Défense possible)" if code == "gel" else "(Aucune défense)"
-                rapport_effets.append(f"{ico} **{nom_etat}** : Tour passé {detail} !")
+                if code == "stun" and data.get("nouveau"):
+                    # Première fois après application : retire le flag, prendra effet au tour suivant
+                    data.pop("nouveau")
+                    rapport_effets.append(f"{ico} **Étourdi** : Étourdissement en cours — bloqué au **prochain tour** !")
+                else:
+                    skip_turn = True
+                    nom_etat = "Gelé" if code == "gel" else "Étourdi"
+                    detail = "(Défense possible)" if code == "gel" else "(Aucune défense)"
+                    rapport_effets.append(f"{ico} **{nom_etat}** : Tour passé {detail} !")
             
             # --- 7. HÂTE ---
             elif code == "hate":
@@ -3072,7 +3100,7 @@ async def tour(interaction: discord.Interaction, perso1: str = None, perso2: str
                 res_txt = "🟨" * nb_r + "⬛" * (5 - nb_r) + f" {px.ferveur}"
             else:
                 res_txt = "—"
-            stun_ico = "💫" if ("stun" in px.effets or "gel" in px.effets) else ""
+            stun_ico = "💫" if (is_stun_actif(px) or "gel" in px.effets) else ""
             lignes_tab.append(
                 f"**{rang}. {px.nom}** {stun_ico} — Init **{sc}** *({det})*\n"
                 f"└ PV: {pv_txt} | Res: {res_txt}"
@@ -3095,7 +3123,7 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Me
     if not dispo:
         return await interaction.response.send_message(msg_err, ephemeral=True)
     # Vérif État Soigneur
-    if "stun" in p.effets or "gel" in p.effets: 
+    if is_stun_actif(p) or "gel" in p.effets: 
         return await interaction.response.send_message("❌ Vous êtes hors d'état d'agir (Stun/Gel).", ephemeral=True)
     if interaction.user.id == cible.id:
         p_cible = p
@@ -3234,7 +3262,7 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
         return await interaction.followup.send(msg_err, ephemeral=True)
     
     # --- VÉRIFICATION ÉTATS BLOQUANTS ---
-    if "stun" in p_attaquant.effets: return await interaction.followup.send("💫 **Étourdi !** Impossible de lancer un clash.", ephemeral=True)
+    if is_stun_actif(p_attaquant): return await interaction.followup.send("💫 **Étourdi !** Impossible de lancer un clash.", ephemeral=True)
     if "gel" in p_attaquant.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible de bouger.", ephemeral=True)
 
     if cible.id == interaction.user.id: return await interaction.followup.send("❌ Cible invalide.", ephemeral=True)
@@ -3359,7 +3387,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
 
     # --- VÉRIFICATIONS DÉFENSEUR ---
     if p_defenseur.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
-    if "stun" in p_defenseur.effets: return await interaction.followup.send("💫 **Étourdi !** Impossible de riposter.", ephemeral=True)
+    if is_stun_actif(p_defenseur): return await interaction.followup.send("💫 **Étourdi !** Impossible de riposter.", ephemeral=True)
     
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: 
@@ -3746,7 +3774,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
     dispo, msg_err = verifier_cooldown(p, sort)
     if not dispo: return await interaction.followup.send(msg_err, ephemeral=True)
 
-    if "stun" in p.effets: return await interaction.followup.send("💫 **Étourdi !**", ephemeral=True)
+    if is_stun_actif(p): return await interaction.followup.send("💫 **Étourdi !**", ephemeral=True)
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !**", ephemeral=True)
 
     sort = resolve_sort_ref(sort)
@@ -4116,7 +4144,7 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
     if p.pv_actuel <= 0: return await interaction.response.send_message("💀 K.O.", ephemeral=True)
 
     # --- A. ÉTOURDISSEMENT (Bloquant Total) ---
-    if "stun" in p.effets:
+    if is_stun_actif(p):
         p.pv_actuel -= degats_subis
         if p.pv_actuel < 0: p.pv_actuel = 0
         p.sauvegarder()
@@ -5345,20 +5373,6 @@ async def my_perso_autocomplete(interaction: discord.Interaction, current: str):
     conn.close()
     
     return [app_commands.Choice(name=p['nom'], value=p['nom']) for p in personnages][:25]
-
-async def joueur_perso_autocomplete(interaction: discord.Interaction, current: str):
-    """Autocomplete listant toutes les fiches du joueur (pour les commandes de combat multi-perso MJ)."""
-    user_id = interaction.user.id
-    conn = get_db_connection()
-    rows = conn.execute(
-        "SELECT nom, classe, niveau FROM joueurs WHERE user_id = ? AND nom LIKE ? ORDER BY nom",
-        (user_id, f"%{current}%")
-    ).fetchall()
-    conn.close()
-    return [
-        app_commands.Choice(name=f"{r['nom']} (Niv {r['niveau']} {r['classe'].capitalize()})", value=r['nom'])
-        for r in rows
-    ][:25]
 
 @bot.tree.command(name="mes_persos", description="Afficher la liste de tous vos personnages")
 async def mes_persos(interaction: discord.Interaction):
