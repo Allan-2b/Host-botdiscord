@@ -2685,361 +2685,27 @@ async def tour(interaction: discord.Interaction,
                perso1: str = None, perso2: str = None, perso3: str = None,
                perso4: str = None, perso5: str = None, perso6: str = None,
                perso7: str = None, perso8: str = None, perso9: str = None):
-    p: Personnage = Personnage.charger(interaction.user.id)
-    if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
-
-    # --- GESTION DES COOLDOWNS ---
-    rapport_effets = []
-    msg_cd_refresh = []
-    cds_a_retirer = []
-
-    # Reset passe_count (Art de l'Estoc Maîtrisé P5) — nouveau tour, compteur Passes à 0
-    if p.passe_count != 0:
-        p.passe_count = 0
     
-    if p.cooldowns:
-        for sort_ref, tours in p.cooldowns.items():
-            p.cooldowns[sort_ref] -= 1
-            if p.cooldowns[sort_ref] <= 0:
-                cds_a_retirer.append(sort_ref)
-                nom_sort = SKILLS_DB.get(sort_ref, {'nom': sort_ref})['nom']
-                msg_cd_refresh.append(f"🔄 **{nom_sort}** est disponible !")
+    # 1. On defer car le chargement et la sauvegarde de 10 fiches peut prendre quelques secondes
+    await interaction.response.defer()
+
+    # --- 2. CHARGEMENT DE TOUS LES PERSONNAGES ---
+    persos_a_traiter = []
     
-    for ref in cds_a_retirer:
-        del p.cooldowns[ref]
-        
-    # On ajoute ces messages au rapport
-    if msg_cd_refresh:
-        rapport_effets.append("\n".join(msg_cd_refresh))
-
-    pv_perdus_total = 0
-    effets_a_supprimer = []
-    
-    # Indicateurs d'état pour le tour
-    skip_turn = False 
-    agi_effective = p.agi 
-    malus_poison_val = 0
-
-    # Configuration des icônes
-    CONFIG_EFFETS = {
-        "brulure": "🔥", "poison": "☠️", "hemorragie": "🩸",
-        "gel": "❄️", "stun": "💫", "root": "🌳",
-        "hate": "⚡", "corruption": "🌑"
-    }
-
-    if p.effets:
-        # --- MOINE DU LOTUS : Corps-Temple → appliqué AVANT le loop DoT ---
-        # Ainsi le Poison est retiré et la Brûlure divisée avant tout calcul de dégâts.
-        if "passif_lotus_corps" in p.competences:
-            if "poison" in p.effets:
-                del p.effets["poison"]
-                rapport_effets.append("🌸 **Corps-Temple** : Immunité au Poison !")
-            if "brulure" in p.effets:
-                p.effets["brulure"]["valeur"] = max(1, p.effets["brulure"]["valeur"] // 2)
-                rapport_effets.append("🌸 **Corps-Temple** : Brûlure divisée par 2.")
-
-        for code, data in p.effets.items():
-            ico = CONFIG_EFFETS.get(code, "❓")
-            if code in ["brulure", "hemorragie"]: 
-                data["valeur"] = data["duree"]
-            valeur = data.get("valeur", 0)
-            
-            # --- 1. BRÛLURE (DoT Fixe) ---
-            if code == "brulure":
-                degats = valeur
-                # Endurance d'Acier (Légion P2) : en Posture, Brûlure ignorée si valeur <= 3
-                if "passif_legion_endurance" in p.competences and p.posture_active and degats <= 3:
-                    rapport_effets.append(f"{ico} **Brûlure** : 🛡️ Endurance d'Acier — ignorée (≤ 3 en Posture).")
-                # Mâchoire de Fer (Clan du Nord P2) : Brûlure seulement les tours impairs de durée
-                elif "passif_nord_machoire" in p.competences and data.get("duree", 0) % 2 == 0:
-                    rapport_effets.append(f"{ico} **Brûlure** : 🦷 Mâchoire de Fer — tour de pause (tous les 2 tours).")
-                else:
-                    pv_perdus_total += degats
-                    rapport_effets.append(f"{ico} **Brûlure** : -{degats} PV")
-
-            # --- 2. POISON (Malus Fixe basé sur le Niveau) ---
-            elif code == "poison":
-                malus_poison_val = (5 + p.niveau) // 5
-                # Endurance d'Acier (Légion P2) : en Posture, Poison ignoré si valeur <= 3
-                if "passif_legion_endurance" in p.competences and p.posture_active and malus_poison_val <= 3:
-                    rapport_effets.append(f"{ico} **Poison** : 🛡️ Endurance d'Acier — ignoré (≤ 3 en Posture).")
-                # Mâchoire de Fer (Clan du Nord P2) : Poison seulement les tours impairs de durée
-                elif "passif_nord_machoire" in p.competences and data.get("duree", 0) % 2 == 0:
-                    rapport_effets.append(f"{ico} **Poison** : 🦷 Mâchoire de Fer — tour de pause (tous les 2 tours).")
-                else:
-                    rapport_effets.append(f"{ico} **Poison** : Malus -{malus_poison_val} aux jets.")
-
-            elif code == "hemorragie":
-                degats_debut = max(1, valeur // 2) 
-                pv_perdus_total += degats_debut
-                rapport_effets.append(f"🩸 **Hémorragie** : -{degats_debut} PV. (Attention: toute attaque vous infligera -{valeur} PV !)")
-
-        # --- 4. CORRUPTION (Parasite de Ressources) ---
-            elif code == "corruption":
-                # La règle dit "mange vos ressources a chaque tour" 
-                drain = 2 # Valeur standard du drain par tour
-                perte_msg = ""
-                
-                if p.classe == "mage" and p.mana > 0:
-                    perte = min(p.mana, drain)
-                    p.mana -= perte
-                    perte_msg = f"-{perte} Mana"
-                elif p.classe == "guerrier" and p.tension > 0:
-                    perte = min(p.tension, drain)
-                    p.tension -= perte
-                    perte_msg = f"-{perte} Tension"
-                elif p.classe == "pretre" and p.ferveur > 0:
-                    perte = min(p.ferveur, drain)
-                    p.ferveur -= perte
-                    perte_msg = f"-{perte} Ferveur"
-                
-                msg_corr = f"{ico} **Corruption** : {perte_msg}" if perte_msg else f"{ico} **Corruption** : Ressources drainées."
-                rapport_effets.append(msg_corr)
-
-            # --- 5. ENRACINEMENT (Agilité 0) ---
-            elif code == "root":
-                 agi_effective = 0 
-                 rapport_effets.append(f"{ico} **Enraciné** : Agilité réduite à 0.")
-
-            # --- 6. CONTRÔLES ---
-            elif code in ["stun", "gel"]:
-                if code == "stun" and data.get("nouveau"):
-                    # Première fois après application : retire le flag, prendra effet au tour suivant
-                    data.pop("nouveau")
-                    rapport_effets.append(f"{ico} **Étourdi** : Étourdissement en cours — bloqué au **prochain tour** !")
-                else:
-                    skip_turn = True
-                    nom_etat = "Gelé" if code == "gel" else "Étourdi"
-                    detail = "(Défense possible)" if code == "gel" else "(Aucune défense)"
-                    rapport_effets.append(f"{ico} **{nom_etat}** : Tour passé {detail} !")
-            
-            # --- 7. HÂTE ---
-            elif code == "hate":
-                rapport_effets.append(f"{ico} **Hâte** : Vos réflexes sont surhumains (+2 Pièces).")
-
-            # --- NOUVEAUX EFFETS V4 ---
-            elif code == "malus_base":
-                malus_b_val = data.get("valeur", 0)
-                rapport_effets.append(f"🔮 **Touche du Destin** : -{malus_b_val} Base sur votre prochain sort !")
-            elif code == "malus_bonus_pieces":
-                malus_bp_val = data.get("valeur", 0)
-                rapport_effets.append(f"🔮 **Présage exact** : -{malus_bp_val} Bonus Pièces sur votre prochain sort !")
-            elif code == "no_soin":
-                rapport_effets.append("🌸 **Paume du Vide** : Impossible d'être soigné ce tour.")
-            elif code == "no_bonus_action":
-                rapport_effets.append("🎯 **Paralysie Neurale** : Action Bonus bloquée ce tour.")
-            elif code == "force_pile":
-                rapport_effets.append("🔮 **Inversion** : Votre prochain jet de dés = toutes pièces Pile !")
-            elif code == "no_buff":
-                rapport_effets.append("📜 **Condamné(e)** : Aucun soin ni buff possible pour le reste du combat.")
-
-            # --- SANG DE TITAN (Régénération) ---
-            elif code == "titanenblut":
-                p.pv_actuel = min(p.pv_max, p.pv_actuel + 10)
-                rapport_effets.append(f"🩸 **Sang de Titan** : Régénération +10 PV.")
-
-            # Décrémentation de la durée
-            p.effets[code]["duree"] -= 1
-            if p.effets[code]["duree"] <= 0:
-                effets_a_supprimer.append(code)
-
-        # Nettoyage
-        for code in effets_a_supprimer:
-            del p.effets[code]
-            rapport_effets.append(f"✨ L'effet **{code.capitalize()}** s'est dissipé.")
-
-        # Application des dégâts totaux du tour
-        if pv_perdus_total > 0:
-            p.pv_actuel -= pv_perdus_total
-            if p.pv_actuel <= 0:
-                if "unsterblich" in p.effets:
-                    p.pv_actuel = 1
-                    del p.effets["unsterblich"]
-                    rapport_effets.append("La mort vous refuse. Vous survivez à 1 PV !")
-                else:
-                    p.pv_actuel = 0
-            if p.classe == "guerrier": p.tension += 1 
-
-    # --- ORDRE HOSPITALIER : Entretien de l'Aura de Sacrifice ---
-    if "ordre_hospitalier" in p.sous_classes_unlocked and "aura_active" in p.effets and p.pv_actuel > 0:
-        cout_aura = 3
-        if p.ferveur >= cout_aura:
-            p.ferveur -= cout_aura
-            rapport_effets.append(f"✨ **Aura de Sacrifice** active (-{cout_aura} Ferveur entretien).")
-            # Passif Foi Inébranlable (P2) : l'Aura se coupe à 1 PV
-            if "passif_hosp_resilience" in p.competences and p.pv_actuel <= 1:
-                del p.effets["aura_active"]
-                rapport_effets.append("✨ **Foi Inébranlable** : Aura coupée (1 PV).")
-        else:
-            del p.effets["aura_active"]
-            rapport_effets.append("✨ **Aura de Sacrifice** : Ferveur insuffisante — Aura désactivée !")
-
-    # --- PRIÈRE CONSTANTE : +10 Ferveur par tour (inconditionnelle) ---
-    if p.classe == "pretre" and p.pv_actuel > 0:
-        gain_passif = 10
-        p.ferveur += gain_passif
-        rapport_effets.append(f"🙏 **Prière Constante** : +{gain_passif} Ferveur.")
-
-    # --- PASSIF HOTE DU BANQUET : démarre combat à 10 Festin si à 0 ---
-    if "passif_sang_hote" in p.competences and p.classe == "mage" and p.festin == 0:
-        p.festin = 10
-        rapport_effets.append("🩸 **L'Hôte du Banquet** : Jauge de Festin initialisée à 10.")
-
-    # --- MOINE DU LOTUS : passif Souffle +3 Ferveur si Concentré ---
-    if "passif_lotus_souffle" in p.competences and p.concentre and p.pv_actuel > 0:
-        p.ferveur += 3
-        rapport_effets.append("🌸 **Souffle du Lotus** : +3 Ferveur (Concentré).")
-
-    # --- LÉGION DE FER : Posture Forcée (Dernier Rempart) décrémente séparément ---
-    if "posture_forcee" in p.effets:
-        p.effets["posture_forcee"]["duree"] -= 1
-        if p.effets["posture_forcee"]["duree"] <= 0:
-            del p.effets["posture_forcee"]
-            p.posture_active = 0
-            rapport_effets.append("🛡️ **Posture Forcée** expirée.")
-
-    # Passe active (École de l'Estoc) : persiste entre les tours volontairement.
-    # Elle est annulée uniquement si la cible subit des dégâts (/defense).
-
-# --- HUD (Barres uniquement) ---
-    def draw_bar(actuel, max_val, length=10, c_full="█", c_empty="░"):
-        if max_val == 0: return c_empty * length
-        pct = max(0, min(1, actuel / max_val))
-        fill = int(pct * length)
-        return f"{c_full * fill}{c_empty * (length - fill)}"
-
-    # On dessine la barre
-    barre_pv = draw_bar(p.pv_actuel, p.pv_max, 10, "🟩", "⬛")
-    
-    txt_res = ""
-    barre_res = ""
-    
-    # On définit le nom de la ressource SANS les chiffres
-    if p.classe == "mage":
-        barre_res = draw_bar(p.mana, p.mana_max, 10, "🟦", "⬛")
-        txt_res = "Mana" 
-    elif p.classe == "guerrier":
-        if p.tension <= 10:
-            barre_res = "🔴" * p.tension
-        else:
-            barre_res = f"🔴 (x{p.tension})"
-        txt_res = "Tension"
-    elif p.classe == "pretre":
-        if p.ferveur <= 100:
-            barre_res = draw_bar(p.ferveur, 100, 10, "🟨", "⬛") 
-        else:
-            barre_res = "🌟" * 10 + " (+)" 
-            
-        txt_res = f"Ferveur: {p.ferveur}" 
-
-    # Construction du texte final (On retire les variables {p.pv_actuel}/{p.pv_max})
-    hud_txt = f"**PV**\n`{barre_pv}`\n**{txt_res}**\n`{barre_res}`"
-
-    # --- JAUGE DE FESTIN (Magie du Sang) ---
-    if "magie_sang" in p.sous_classes_unlocked and p.classe == "mage":
-        stade = get_festin_stade(p)
-        festin_max = get_festin_max(p)
-        festin_barre = draw_bar(p.festin, festin_max, 10, "🩸", "⬛")
-        stade_label = f"Stade {stade}" if stade > 0 else "Stade 0"
-        hud_txt += f"\n**🩸 Festin [{stade_label}]**\n`{festin_barre}` ({p.festin}/{festin_max})"
-        if stade == 1: hud_txt += " *(+3 dmg Tronc)*"
-        elif stade == 2: hud_txt += " *(+6 dmg + Hémo Tronc)*"
-        elif stade == 3: hud_txt += " *(Sorts sous-classe actifs)*"
-        elif stade == 4: hud_txt += " *(Dégâts sous-classe x2)*"
-
-    # --- CHARGES ÉLÉMENTAIRES (Magie Élémentaire) ---
-    if "magie_elementaire" in p.sous_classes_unlocked and p.classe == "mage":
-        icones_elem = {"feu":"🔥","glace":"❄️","foudre":"⚡","air":"💨"}
-        max_ch = get_max_charges(p)
-        ch_txt = " ".join([icones_elem.get(e, e) for e in p.charges_elementaires]) if p.charges_elementaires else "*Aucune*"
-        bonus_res = get_bonus_resonance(p)
-        res_details = []
-        if "feu" in bonus_res: res_details.append(f"🔥+{bonus_res['feu']}dmg")
-        if "glace" in bonus_res: res_details.append(f"❄️+{bonus_res['glace']}Rob")
-        if "foudre" in bonus_res: res_details.append(f"⚡+{bonus_res['foudre']}Init")
-        if "air" in bonus_res: res_details.append(f"💨+{bonus_res['air']}Esq")
-        res_txt = " ".join(res_details) if res_details else "*Pas de Résonance*"
-        hud_txt += f"\n**✨ Charges [{len(p.charges_elementaires)}/{max_ch}]** : {ch_txt}\n*Résonance : {res_txt}*"
-
-    if p.cooldowns:
-        hud_txt += "\n\n⏳ **Recharge :**"
-        for ref, tr in p.cooldowns.items():
-             nom = SKILLS_DB.get(ref, {'nom': ref})['nom']
-             hud_txt += f"\n• {nom} : {tr} tr"
-
-    # --- HUD V4 : états sous-classes ---
-    hud_v4 = ""
-    # Posture Légion de Fer
-    if "legion_fer" in p.sous_classes_unlocked:
-        statut_posture = "🛡️ **Posture ACTIVE**" if p.posture_active else "⚔️ Posture inactive"
-        hud_v4 += f"\n{statut_posture}"
-    # Serment du Sang (Clan du Nord)
-    if "clan_nord" in p.sous_classes_unlocked and p.serment_actif:
-        hud_v4 += f"\n🩸 **Serment actif** (Bonus : +{p.serment_bonus})"
-    # Concentré/Perturbé (Moine du Lotus)
-    if "moine_lotus" in p.sous_classes_unlocked:
-        etat_moine = "🌸 **Concentré**" if p.concentre else "🔥 **Perturbé** (+4 Dégâts)"
-        hud_v4 += f"\n{etat_moine}"
-    # Lestages gravitationnels (sur soi)
-    lestage_perso = get_lestage(p)
-    if lestage_perso > 0:
-        hud_v4 += f"\n⚖️ **Lestages** : {lestage_perso}"
-    # Désignation (Loge de l'Ombre)
-    if p.designation_stacks > 0:
-        hud_v4 += f"\n🎯 **Désignation** active ({p.designation_stacks} stack(s))"
-    # Sentence (Inquisiteur)
-    if p.sentence_targets:
-        hud_v4 += f"\n📜 **Sentence** prononcée"
-    # Passe Estoc
-    if p.passe_active:
-        hud_v4 += f"\n⚔️ **Passe active !**"
-    if hud_v4:
-        hud_txt += f"\n\n**⚔️ États Actifs :**{hud_v4}"
-
-    # --- INITIATIVE ---
-    d1 = random.randint(1, 20)
-    
-    # Gestion Hâte / Féral (Avantage)
-    if "hate" in p.effets or p.race == "Féral":
-        d2 = random.randint(1, 20)
-        d_retenu = max(d1, d2)
-        visuel_de = f"[{d1}, **{d2}**]" if d2 > d1 else f"[**{d1}**, {d2}]"
-        d1 = d_retenu
-    else:
-        visuel_de = f"{d1}"
-
-    # Calcul final avec Malus Poison et Agi Effective (0 si root)
-    score_init = d1 + agi_effective - malus_poison_val
-    detail_init = f"Dé {visuel_de} + Agi {agi_effective}"
-
-    # --- Résonance Foudre : +2 Initiative ---
-    if "magie_elementaire" in p.sous_classes_unlocked and p.classe == "mage":
-        bonus_res_init = get_bonus_resonance(p)
-        if "foudre" in bonus_res_init:
-            score_init += bonus_res_init["foudre"]
-            detail_init += f" + {bonus_res_init['foudre']} (⚡Rés)"
-    
-    if malus_poison_val > 0: detail_init += f" - {malus_poison_val} (Psn)"
-    if p.race == "Elfe" and p.classe == "guerrier":
-        bonus = (p.niveau // 3) * 2
-        score_init += bonus; detail_init += f" + {bonus} (Elfe)"
-
-    p.sauvegarder()
-
-    # --- CONSTRUCTION DU TABLEAU D'INITIATIVE ---
-    # Le joueur courant est toujours inclus, + les persos supplémentaires
-    entrees_init = [(p, score_init, detail_init, skip_turn)]
+    p_main = Personnage.charger(interaction.user.id)
+    if not p_main: 
+        return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
+    persos_a_traiter.append(p_main)
 
     perso_noms_args = [a for a in [perso1, perso2, perso3, perso4, perso5, perso6, perso7, perso8, perso9] if a]
     for arg in perso_noms_args:
+        p_extra = None
         if ":" in arg:
             parts = arg.split(":", 1)
             try:
-                uid_extra = int(parts[0])
-                nom_extra = parts[1]
-                p_extra = Personnage.charger_par_nom(uid_extra, nom_extra)
+                p_extra = Personnage.charger_par_nom(int(parts[0]), parts[1])
             except (ValueError, IndexError):
-                p_extra = None
+                pass
         else:
             conn = get_db_connection()
             row = conn.execute("""
@@ -3048,23 +2714,253 @@ async def tour(interaction: discord.Interaction,
                 WHERE j.nom = ? LIMIT 1
             """, (arg,)).fetchone()
             conn.close()
-            p_extra = Personnage.charger(row['user_id']) if row else None
+            if row:
+                p_extra = Personnage.charger(row['user_id'])
+        
+        if p_extra:
+            persos_a_traiter.append(p_extra)
 
-        if not p_extra:
-            continue
-        agi_e = p_extra.agi if "root" not in p_extra.effets else 0
-        d_e = random.randint(1, 20)
-        if "hate" in p_extra.effets or p_extra.race == "Féral":
-            d_e2 = random.randint(1, 20)
-            d_e = max(d_e, d_e2)
-        score_e = d_e + agi_e
-        if p_extra.race == "Elfe" and p_extra.classe == "guerrier":
-            score_e += (p_extra.niveau // 3) * 2
-        detail_e = f"Dé {d_e} + Agi {agi_e}"
-        skip_e = is_stun_actif(p_extra) or "gel" in p_extra.effets
-        entrees_init.append((p_extra, score_e, detail_e, skip_e))
+    entrees_init = []
 
-    # Tri par initiative croissante
+    # --- 3. TRAITEMENT DE CHAQUE PERSONNAGE ---
+    for p in persos_a_traiter:
+        rapport_effets = []
+        msg_cd_refresh = []
+        cds_a_retirer = []
+        
+        # Indicateurs d'état pour le tour
+        skip_turn = False 
+        agi_effective = p.agi 
+        malus_poison_val = 0
+        pv_perdus_total = 0
+        effets_a_supprimer = []
+
+        # Reset passe_count
+        if p.passe_count != 0:
+            p.passe_count = 0
+        
+        # --- GESTION DES COOLDOWNS ---
+        if p.cooldowns:
+            for sort_ref in list(p.cooldowns.keys()):
+                p.cooldowns[sort_ref] -= 1
+                if p.cooldowns[sort_ref] <= 0:
+                    cds_a_retirer.append(sort_ref)
+                    nom_sort = SKILLS_DB.get(sort_ref, {'nom': sort_ref})['nom']
+                    msg_cd_refresh.append(f"🔄 **{nom_sort}** est disponible !")
+        
+        for ref in cds_a_retirer:
+            del p.cooldowns[ref]
+            
+        if msg_cd_refresh:
+            rapport_effets.append("\n".join(msg_cd_refresh))
+
+        # --- GESTION DES EFFETS ---
+        CONFIG_EFFETS = {
+            "brulure": "🔥", "poison": "☠️", "hemorragie": "🩸",
+            "gel": "❄️", "stun": "💫", "root": "🌳",
+            "hate": "⚡", "corruption": "🌑"
+        }
+
+        if p.effets:
+            if "passif_lotus_corps" in p.competences:
+                if "poison" in p.effets:
+                    del p.effets["poison"]
+                    rapport_effets.append("🌸 **Corps-Temple** : Immunité au Poison !")
+                if "brulure" in p.effets:
+                    p.effets["brulure"]["valeur"] = max(1, p.effets["brulure"]["valeur"] // 2)
+                    rapport_effets.append("🌸 **Corps-Temple** : Brûlure divisée par 2.")
+
+            # On utilise list() pour éviter les erreurs si on modifie le dict pendant la boucle
+            for code, data in list(p.effets.items()):
+                ico = CONFIG_EFFETS.get(code, "❓")
+                if code in ["brulure", "hemorragie"]: 
+                    data["valeur"] = data["duree"]
+                valeur = data.get("valeur", 0)
+                
+                if code == "brulure":
+                    degats = valeur
+                    if "passif_legion_endurance" in p.competences and p.posture_active and degats <= 3:
+                        rapport_effets.append(f"{ico} **Brûlure** : 🛡️ Endurance d'Acier — ignorée (≤ 3 en Posture).")
+                    elif "passif_nord_machoire" in p.competences and data.get("duree", 0) % 2 == 0:
+                        rapport_effets.append(f"{ico} **Brûlure** : 🦷 Mâchoire de Fer — tour de pause.")
+                    else:
+                        pv_perdus_total += degats
+                        rapport_effets.append(f"{ico} **Brûlure** : -{degats} PV")
+
+                elif code == "poison":
+                    malus_poison_val = (5 + p.niveau) // 5
+                    if "passif_legion_endurance" in p.competences and p.posture_active and malus_poison_val <= 3:
+                        rapport_effets.append(f"{ico} **Poison** : 🛡️ Endurance d'Acier — ignoré.")
+                    elif "passif_nord_machoire" in p.competences and data.get("duree", 0) % 2 == 0:
+                        rapport_effets.append(f"{ico} **Poison** : 🦷 Mâchoire de Fer — tour de pause.")
+                    else:
+                        rapport_effets.append(f"{ico} **Poison** : Malus -{malus_poison_val} aux jets.")
+
+                elif code == "hemorragie":
+                    degats_debut = max(1, valeur // 2) 
+                    pv_perdus_total += degats_debut
+                    rapport_effets.append(f"🩸 **Hémorragie** : -{degats_debut} PV. (Attention: -{valeur} PV à chaque attaque !)")
+
+                elif code == "corruption":
+                    drain = 2 
+                    perte_msg = ""
+                    if p.classe == "mage" and p.mana > 0:
+                        perte = min(p.mana, drain); p.mana -= perte; perte_msg = f"-{perte} Mana"
+                    elif p.classe == "guerrier" and p.tension > 0:
+                        perte = min(p.tension, drain); p.tension -= perte; perte_msg = f"-{perte} Tension"
+                    elif p.classe == "pretre" and p.ferveur > 0:
+                        perte = min(p.ferveur, drain); p.ferveur -= perte; perte_msg = f"-{perte} Ferveur"
+                    
+                    msg_corr = f"{ico} **Corruption** : {perte_msg}" if perte_msg else f"{ico} **Corruption** : Ressources drainées."
+                    rapport_effets.append(msg_corr)
+
+                elif code == "root":
+                     agi_effective = 0 
+                     rapport_effets.append(f"{ico} **Enraciné** : Agilité réduite à 0.")
+
+                elif code in ["stun", "gel"]:
+                    if code == "stun" and data.get("nouveau"):
+                        data.pop("nouveau")
+                        rapport_effets.append(f"{ico} **Étourdi** : Bloqué au **prochain tour** !")
+                    else:
+                        skip_turn = True
+                        nom_etat = "Gelé" if code == "gel" else "Étourdi"
+                        detail = "(Défense possible)" if code == "gel" else "(Aucune défense)"
+                        rapport_effets.append(f"{ico} **{nom_etat}** : Tour passé {detail} !")
+                
+                elif code == "hate":
+                    rapport_effets.append(f"{ico} **Hâte** : +2 Pièces.")
+
+                elif code == "malus_base":
+                    malus_b_val = data.get("valeur", 0)
+                    rapport_effets.append(f"🔮 **Touche du Destin** : -{malus_b_val} Base !")
+                elif code == "malus_bonus_pieces":
+                    malus_bp_val = data.get("valeur", 0)
+                    rapport_effets.append(f"🔮 **Présage exact** : -{malus_bp_val} Bonus Pièces !")
+                elif code == "no_soin":
+                    rapport_effets.append("🌸 **Paume du Vide** : Impossible d'être soigné ce tour.")
+                elif code == "no_bonus_action":
+                    rapport_effets.append("🎯 **Paralysie Neurale** : Action Bonus bloquée ce tour.")
+                elif code == "force_pile":
+                    rapport_effets.append("🔮 **Inversion** : Votre prochain jet de dés = Pile !")
+                elif code == "no_buff":
+                    rapport_effets.append("📜 **Condamné(e)** : Aucun soin ni buff possible.")
+                elif code == "titanenblut":
+                    p.pv_actuel = min(p.pv_max, p.pv_actuel + 10)
+                    rapport_effets.append(f"🩸 **Sang de Titan** : Régénération +10 PV.")
+
+                # Décrémentation de la durée
+                p.effets[code]["duree"] -= 1
+                if p.effets[code]["duree"] <= 0:
+                    effets_a_supprimer.append(code)
+
+            # Nettoyage
+            for code in effets_a_supprimer:
+                if code in p.effets:
+                    del p.effets[code]
+                    rapport_effets.append(f"✨ L'effet **{code.capitalize()}** s'est dissipé.")
+
+            # Application des dégâts totaux du tour
+            if pv_perdus_total > 0:
+                p.pv_actuel -= pv_perdus_total
+                if p.pv_actuel <= 0:
+                    if "unsterblich" in p.effets:
+                        p.pv_actuel = 1
+                        del p.effets["unsterblich"]
+                        rapport_effets.append("La mort vous refuse. Vous survivez à 1 PV !")
+                    else:
+                        p.pv_actuel = 0
+                if p.classe == "guerrier": p.tension += 1 
+
+        # --- GESTION DES PASSIFS DE CLASSE ---
+        if "ordre_hospitalier" in p.sous_classes_unlocked and "aura_active" in p.effets and p.pv_actuel > 0:
+            cout_aura = 3
+            if p.ferveur >= cout_aura:
+                p.ferveur -= cout_aura
+                rapport_effets.append(f"✨ **Aura de Sacrifice** active (-{cout_aura} Ferveur entretien).")
+                if "passif_hosp_resilience" in p.competences and p.pv_actuel <= 1:
+                    del p.effets["aura_active"]
+                    rapport_effets.append("✨ **Foi Inébranlable** : Aura coupée (1 PV).")
+            else:
+                del p.effets["aura_active"]
+                rapport_effets.append("✨ **Aura de Sacrifice** : Ferveur insuffisante — Aura désactivée !")
+
+        if p.classe == "pretre" and p.pv_actuel > 0:
+            gain_passif = 10
+            p.ferveur += gain_passif
+            rapport_effets.append(f"🙏 **Prière Constante** : +{gain_passif} Ferveur.")
+
+        if "passif_sang_hote" in p.competences and p.classe == "mage" and p.festin == 0:
+            p.festin = 10
+            rapport_effets.append("🩸 **L'Hôte du Banquet** : Jauge de Festin initialisée à 10.")
+
+        if "passif_lotus_souffle" in p.competences and p.concentre and p.pv_actuel > 0:
+            p.ferveur += 3
+            rapport_effets.append("🌸 **Souffle du Lotus** : +3 Ferveur (Concentré).")
+
+        if "posture_forcee" in p.effets:
+            p.effets["posture_forcee"]["duree"] -= 1
+            if p.effets["posture_forcee"]["duree"] <= 0:
+                del p.effets["posture_forcee"]
+                p.posture_active = 0
+                rapport_effets.append("🛡️ **Posture Forcée** expirée.")
+
+        # --- HUD SPÉCIFIQUE & ÉTATS ACTIFS (HUD V4) ---
+        hud_v4 = ""
+        if "magie_sang" in p.sous_classes_unlocked and p.classe == "mage":
+            stade = get_festin_stade(p)
+            festin_max = get_festin_max(p)
+            stade_label = f"Stade {stade}" if stade > 0 else "Stade 0"
+            hud_v4 += f"\n🩸 **Festin [{stade_label}]** : {p.festin}/{festin_max}"
+            
+        if "magie_elementaire" in p.sous_classes_unlocked and p.classe == "mage":
+            icones_elem = {"feu":"🔥","glace":"❄️","foudre":"⚡","air":"💨"}
+            ch_txt = " ".join([icones_elem.get(e, e) for e in p.charges_elementaires]) if p.charges_elementaires else "*Aucune*"
+            hud_v4 += f"\n✨ **Charges Élémentaires** : {ch_txt}"
+
+        if "legion_fer" in p.sous_classes_unlocked:
+            hud_v4 += f"\n🛡️ **Posture ACTIVE**" if p.posture_active else "\n⚔️ Posture inactive"
+        if "clan_nord" in p.sous_classes_unlocked and p.serment_actif:
+            hud_v4 += f"\n🩸 **Serment actif** (+{p.serment_bonus})"
+        if "moine_lotus" in p.sous_classes_unlocked:
+            hud_v4 += f"\n🌸 **Concentré**" if p.concentre else "\n🔥 **Perturbé** (+4 Dégâts)"
+        
+        lestage_perso = get_lestage(p)
+        if lestage_perso > 0: hud_v4 += f"\n⚖️ **Lestages** : {lestage_perso}"
+        if p.designation_stacks > 0: hud_v4 += f"\n🎯 **Désignation** ({p.designation_stacks} stack(s))"
+        if p.sentence_targets: hud_v4 += f"\n📜 **Sentence** prononcée"
+        if p.passe_active: hud_v4 += f"\n⚔️ **Passe active !**"
+
+        # --- INITIATIVE ---
+        d1 = random.randint(1, 20)
+        if "hate" in p.effets or p.race == "Féral":
+            d2 = random.randint(1, 20)
+            d_retenu = max(d1, d2)
+            visuel_de = f"[{d1}, **{d2}**]" if d2 > d1 else f"[**{d1}**, {d2}]"
+            d1 = d_retenu
+        else:
+            visuel_de = f"{d1}"
+
+        score_init = d1 + agi_effective - malus_poison_val
+        detail_init = f"Dé {visuel_de} + Agi {agi_effective}"
+
+        if "magie_elementaire" in p.sous_classes_unlocked and p.classe == "mage":
+            bonus_res_init = get_bonus_resonance(p)
+            if "foudre" in bonus_res_init:
+                score_init += bonus_res_init["foudre"]
+                detail_init += f" + {bonus_res_init['foudre']} (⚡Rés)"
+        
+        if malus_poison_val > 0: detail_init += f" - {malus_poison_val} (Psn)"
+        if p.race == "Elfe" and p.classe == "guerrier":
+            bonus = (p.niveau // 3) * 2
+            score_init += bonus; detail_init += f" + {bonus} (Elfe)"
+
+        # SAUVEGARDE DU PERSONNAGE
+        p.sauvegarder()
+
+        entrees_init.append((p, score_init, detail_init, skip_turn, rapport_effets, hud_v4))
+
+    # --- 4. CONSTRUCTION DU TABLEAU D'INITIATIVE ---
     entrees_init.sort(key=lambda x: x[1])
 
     def build_bar(actuel, max_val, longueur=8, c_full="█", c_empty="░"):
@@ -3073,43 +2969,38 @@ async def tour(interaction: discord.Interaction,
         fill = round(pct * longueur)
         return c_full * fill + c_empty * (longueur - fill)
 
-    # Un embed par joueur (pour afficher les images individuelles)
     embeds_joueurs = []
-    for rang, (px, sc, det, sk) in enumerate(entrees_init, 1):
-        stun_ico = "💫 " if (is_stun_actif(px) or "gel" in px.effets) else ""
+    for rang, (px, sc, det, sk, rapports, h_v4) in enumerate(entrees_init, 1):
+        stun_ico = "💫 " if sk else ""
         couleur_px = 0xe74c3c if sk else 0x2ecc71
 
-        # Barres sans chiffres
         bar_pv = build_bar(px.pv_actuel, px.pv_max, 8, "🟩", "⬛")
 
         if px.classe == "mage":
-            bar_res = build_bar(px.mana, px.mana_max, 8, "🟦", "⬛")
-            label_res = "Mana"
+            bar_res = build_bar(px.mana, px.mana_max, 8, "🟦", "⬛"); label_res = "Mana"
         elif px.classe == "guerrier":
-            bar_res = build_bar(min(px.tension, 10), 10, 8, "🔴", "⬛")
-            label_res = "Tension"
+            bar_res = build_bar(min(px.tension, 10), 10, 8, "🔴", "⬛"); label_res = "Tension"
         elif px.classe == "pretre":
-            bar_res = build_bar(px.ferveur, 100, 8, "🟨", "⬛")
-            label_res = "Ferveur"
+            bar_res = build_bar(px.ferveur, 100, 8, "🟨", "⬛"); label_res = "Ferveur"
         else:
-            bar_res = "—"
-            label_res = "Res"
+            bar_res = "—"; label_res = "Res"
 
-        # Effets actifs résumés
         icones_effets = {
             "brulure": "🔥", "poison": "☠️", "hemorragie": "🩸",
             "gel": "❄️", "stun": "💫", "root": "🌳", "hate": "⚡", "corruption": "🌑"
         }
         effets_actifs = " ".join(icones_effets[e] for e in px.effets if e in icones_effets)
 
-        contenu = (
-            f"`PV  ` {bar_pv}\n"
-            f"`{label_res[:3]:<3} ` {bar_res}"
-        )
+        contenu = f"`PV  ` {bar_pv}\n`{label_res[:3]:<3} ` {bar_res}"
+        
+        if h_v4:
+            contenu += f"\n{h_v4}"
         if effets_actifs:
-            contenu += f"\n{effets_actifs}"
+            contenu += f"\n\n**Effets :** {effets_actifs}"
+        if rapports:
+            contenu += f"\n\n📝 **Journal :**\n" + "\n".join(rapports)
         if sk:
-            contenu += "\n**🚫 Tour passé**"
+            contenu += "\n\n**🚫 Tour passé**"
 
         em = discord.Embed(
             title=f"{rang}. {stun_ico}{px.nom}  —  Init **{sc}**",
@@ -3121,17 +3012,18 @@ async def tour(interaction: discord.Interaction,
         em.set_footer(text=f"{det}")
         embeds_joueurs.append(em)
 
-    # Embed header minimaliste
     header = discord.Embed(
         title="📋 Ordre du Tour (croissant)",
-        color=0x2ecc71 if not skip_turn else 0xe74c3c
+        color=0x2ecc71
     )
     header.set_footer(text="À vous ! (/attaque, /clash...)")
 
     all_embeds = [header] + embeds_joueurs
 
     await log_combat(interaction, header)
-    await interaction.response.send_message(embeds=all_embeds)
+    
+    # On utilise followup.send car on a utilisé defer() au début
+    await interaction.followup.send(embeds=all_embeds)
 
 
 # 1. SOIN
