@@ -3014,102 +3014,112 @@ async def tour(interaction: discord.Interaction, perso1: str = None, perso2: str
 
     p.sauvegarder()
 
-    # --- AFFICHAGE ---
-    couleur = 0xe74c3c if skip_turn else 0x2ecc71
-    embed = discord.Embed(title=f"⏱️ Tour de {p.nom}", color=couleur)
-    if p.image_url: embed.set_thumbnail(url=p.image_url)
-    
-    embed.add_field(name="📊 État Vital", value=hud_txt, inline=False)
-    
-    val_effets = "\n".join(rapport_effets) if rapport_effets else "*Aucun effet.*"
-    embed.add_field(name="🧬 Statut", value=val_effets, inline=False)
+    # --- CONSTRUCTION DU TABLEAU D'INITIATIVE ---
+    # Le joueur courant est toujours inclus, + les persos supplémentaires
+    entrees_init = [(p, score_init, detail_init, skip_turn)]
 
-    # --- BADGES ---
-    if p.badges:
-        badges_txt = " • ".join([f"🏅 {b}" for b in p.badges])
-        embed.add_field(name="🏅 Titres", value=badges_txt, inline=False)
-
-    if skip_turn:
-        embed.add_field(name="🚫 STOP", value="**Tour passé !**", inline=False)
-    else:
-        embed.add_field(name="🚀 Initiative", value=f"**{score_init}**\n*({detail_init})*", inline=False)
-        embed.set_footer(text="À vous ! (/attaque, /clash...)")
-
-    # --- TABLEAU D'INITIATIVE MULTI-PERSONNAGES ---
-    # On récupère les persos supplémentaires si spécifiés
     perso_noms_args = [a for a in [perso1, perso2, perso3, perso4] if a]
-    if perso_noms_args:
-        # Entrées : liste de (personnage, score_init, detail_init)
-        entrees_init = [(p, score_init, detail_init)]
-        for arg in perso_noms_args:
-            # Format attendu : "user_id:nom" (depuis l'autocomplete)
-            if ":" in arg:
-                parts = arg.split(":", 1)
-                try:
-                    uid_extra = int(parts[0])
-                    nom_extra = parts[1]
-                    p_extra = Personnage.charger_par_nom(uid_extra, nom_extra)
-                except (ValueError, IndexError):
-                    p_extra = None
-            else:
-                # Fallback : cherche par nom parmi les sessions actives
-                conn = get_db_connection()
-                row = conn.execute("""
-                    SELECT j.user_id FROM sessions s
-                    JOIN joueurs j ON j.user_id = s.user_id AND j.nom = s.nom_perso_actif
-                    WHERE j.nom = ? LIMIT 1
-                """, (arg,)).fetchone()
-                conn.close()
-                p_extra = Personnage.charger(row['user_id']) if row else None
+    for arg in perso_noms_args:
+        if ":" in arg:
+            parts = arg.split(":", 1)
+            try:
+                uid_extra = int(parts[0])
+                nom_extra = parts[1]
+                p_extra = Personnage.charger_par_nom(uid_extra, nom_extra)
+            except (ValueError, IndexError):
+                p_extra = None
+        else:
+            conn = get_db_connection()
+            row = conn.execute("""
+                SELECT j.user_id FROM sessions s
+                JOIN joueurs j ON j.user_id = s.user_id AND j.nom = s.nom_perso_actif
+                WHERE j.nom = ? LIMIT 1
+            """, (arg,)).fetchone()
+            conn.close()
+            p_extra = Personnage.charger(row['user_id']) if row else None
 
-            if not p_extra:
-                continue
-            # Calcul init du perso supplémentaire
-            agi_e = p_extra.agi if "root" not in p_extra.effets else 0
-            d_e = random.randint(1, 20)
-            if "hate" in p_extra.effets or p_extra.race == "Féral":
-                d_e2 = random.randint(1, 20)
-                d_e = max(d_e, d_e2)
-            score_e = d_e + agi_e
-            if p_extra.race == "Elfe" and p_extra.classe == "guerrier":
-                score_e += (p_extra.niveau // 3) * 2
-            detail_e = f"Dé {d_e} + Agi {agi_e}"
-            entrees_init.append((p_extra, score_e, detail_e))
+        if not p_extra:
+            continue
+        agi_e = p_extra.agi if "root" not in p_extra.effets else 0
+        d_e = random.randint(1, 20)
+        if "hate" in p_extra.effets or p_extra.race == "Féral":
+            d_e2 = random.randint(1, 20)
+            d_e = max(d_e, d_e2)
+        score_e = d_e + agi_e
+        if p_extra.race == "Elfe" and p_extra.classe == "guerrier":
+            score_e += (p_extra.niveau // 3) * 2
+        detail_e = f"Dé {d_e} + Agi {agi_e}"
+        skip_e = is_stun_actif(p_extra) or "gel" in p_extra.effets
+        entrees_init.append((p_extra, score_e, detail_e, skip_e))
 
-        # Tri par initiative croissante (ordre du tour)
-        entrees_init.sort(key=lambda x: x[1])
+    # Tri par initiative croissante
+    entrees_init.sort(key=lambda x: x[1])
 
-        # Construction du tableau
-        lignes_tab = []
-        for rang, (px, sc, det) in enumerate(entrees_init, 1):
-            # Jauge PV compact
-            pct_pv = max(0, min(1, px.pv_actuel / px.pv_max)) if px.pv_max > 0 else 0
-            nb_pv = int(pct_pv * 5)
-            bar_pv = "🟩" * nb_pv + "⬛" * (5 - nb_pv)
-            pv_txt = f"{bar_pv} {px.pv_actuel}/{px.pv_max}"
-            # Jauge ressource compact
-            if px.classe == "mage":
-                pct_r = max(0, min(1, px.mana / px.mana_max)) if px.mana_max > 0 else 0
-                nb_r = int(pct_r * 5)
-                res_txt = "🟦" * nb_r + "⬛" * (5 - nb_r) + f" {px.mana}"
-            elif px.classe == "guerrier":
-                res_txt = f"🔴×{px.tension}"
-            elif px.classe == "pretre":
-                pct_r = max(0, min(1, px.ferveur / 100)) if px.ferveur <= 100 else 1
-                nb_r = int(pct_r * 5)
-                res_txt = "🟨" * nb_r + "⬛" * (5 - nb_r) + f" {px.ferveur}"
-            else:
-                res_txt = "—"
-            stun_ico = "💫" if (is_stun_actif(px) or "gel" in px.effets) else ""
-            lignes_tab.append(
-                f"**{rang}. {px.nom}** {stun_ico} — Init **{sc}** *({det})*\n"
-                f"└ PV: {pv_txt} | Res: {res_txt}"
-            )
-        tab_txt = "\n".join(lignes_tab)
-        embed.add_field(name="📋 Ordre du Tour (croissant)", value=tab_txt, inline=False)
+    def build_bar(actuel, max_val, longueur=8, c_full="█", c_empty="░"):
+        if max_val <= 0: return c_empty * longueur
+        pct = max(0.0, min(1.0, actuel / max_val))
+        fill = round(pct * longueur)
+        return c_full * fill + c_empty * (longueur - fill)
 
-    await log_combat(interaction, embed)
-    await interaction.response.send_message(embed=embed)
+    # Un embed par joueur (pour afficher les images individuelles)
+    embeds_joueurs = []
+    for rang, (px, sc, det, sk) in enumerate(entrees_init, 1):
+        stun_ico = "💫 " if (is_stun_actif(px) or "gel" in px.effets) else ""
+        couleur_px = 0xe74c3c if sk else 0x2ecc71
+
+        # Barres sans chiffres
+        bar_pv = build_bar(px.pv_actuel, px.pv_max, 8, "🟩", "⬛")
+
+        if px.classe == "mage":
+            bar_res = build_bar(px.mana, px.mana_max, 8, "🟦", "⬛")
+            label_res = "Mana"
+        elif px.classe == "guerrier":
+            bar_res = build_bar(min(px.tension, 10), 10, 8, "🔴", "⬛")
+            label_res = "Tension"
+        elif px.classe == "pretre":
+            bar_res = build_bar(px.ferveur, 100, 8, "🟨", "⬛")
+            label_res = "Ferveur"
+        else:
+            bar_res = "—"
+            label_res = "Res"
+
+        # Effets actifs résumés
+        icones_effets = {
+            "brulure": "🔥", "poison": "☠️", "hemorragie": "🩸",
+            "gel": "❄️", "stun": "💫", "root": "🌳", "hate": "⚡", "corruption": "🌑"
+        }
+        effets_actifs = " ".join(icones_effets[e] for e in px.effets if e in icones_effets)
+
+        contenu = (
+            f"`PV  ` {bar_pv}\n"
+            f"`{label_res[:3]:<3} ` {bar_res}"
+        )
+        if effets_actifs:
+            contenu += f"\n{effets_actifs}"
+        if sk:
+            contenu += "\n**🚫 Tour passé**"
+
+        em = discord.Embed(
+            title=f"{rang}. {stun_ico}{px.nom}  —  Init **{sc}**",
+            description=contenu,
+            color=couleur_px
+        )
+        if px.image_url:
+            em.set_thumbnail(url=px.image_url)
+        em.set_footer(text=f"{det}")
+        embeds_joueurs.append(em)
+
+    # Embed header minimaliste
+    header = discord.Embed(
+        title="📋 Ordre du Tour (croissant)",
+        color=0x2ecc71 if not skip_turn else 0xe74c3c
+    )
+    header.set_footer(text="À vous ! (/attaque, /clash...)")
+
+    all_embeds = [header] + embeds_joueurs
+
+    await log_combat(interaction, header)
+    await interaction.response.send_message(embeds=all_embeds)
 
 
 # 1. SOIN
