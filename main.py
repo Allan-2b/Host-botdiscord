@@ -3287,7 +3287,10 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
     if is_stun_actif(p_attaquant): return await interaction.followup.send("💫 **Étourdi !** Impossible de lancer un clash.", ephemeral=True)
     if "gel" in p_attaquant.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible de bouger.", ephemeral=True)
 
-    if cible.id == interaction.user.id: return await interaction.followup.send("❌ Cible invalide.", ephemeral=True)
+    # Blocage auto-ciblage — sauf pour un GM qui joue deux fiches distinctes
+    if cible.id == interaction.user.id:
+        if not (is_gm(interaction.user.id) and personnage):
+            return await interaction.followup.send("❌ Cible invalide.", ephemeral=True)
     if cible.id in PENDING_CLASHES: return await interaction.followup.send(f"❌ Déjà défié.", ephemeral=True)
     
     sort = resolve_sort_ref(sort)
