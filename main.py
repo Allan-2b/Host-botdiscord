@@ -1303,6 +1303,55 @@ class Personnage:
         p.charger_equipement()
         return p
 
+    @staticmethod
+    def charger_par_nom(user_id, nom: str):
+        """Charge un personnage précis d'un joueur sans toucher à sa session active."""
+        conn = get_db_connection()
+        row = conn.execute('SELECT * FROM joueurs WHERE user_id = ? AND nom = ?', (user_id, nom)).fetchone()
+        conn.close()
+        if not row: return None
+        # On réutilise la logique complète de charger() en faisant une petite astuce :
+        # On force temporairement la session dans l'objet sans l'écrire en DB.
+        race_db = row['race'] if row['race'] else "Humain"
+        p = Personnage(user_id, row['nom'], row['classe'], race=race_db, charger_db=True)
+        colonnes_a_ignorer = ['competences', 'sous_classes_unlocked', 'race', 'effets', 'groupe', 'stabilite', 'sursaut_dispo','familier', 'familier_dispo', 'charges_elementaires']
+        for col in row.keys():
+            if col not in colonnes_a_ignorer:
+                setattr(p, col, row[col])
+        try: p.competences = json.loads(row['competences'])
+        except (json.JSONDecodeError, TypeError): p.competences = []
+        try: p.sous_classes_unlocked = json.loads(row['sous_classes_unlocked'])
+        except (json.JSONDecodeError, TypeError): p.sous_classes_unlocked = []
+        try: p.effets = json.loads(row['effets'])
+        except (json.JSONDecodeError, TypeError): p.effets = {}
+        try: p.cooldowns = json.loads(row['cooldowns'])
+        except (json.JSONDecodeError, TypeError): p.cooldowns = {}
+        p.monnaie = row['monnaie'] if 'monnaie' in row.keys() else 0
+        p.robustesse = row['robustesse'] if 'robustesse' in row.keys() else 0
+        p.festin = row['festin'] if 'festin' in row.keys() else 0
+        try: p.charges_elementaires = json.loads(row['charges_elementaires']) if 'charges_elementaires' in row.keys() else []
+        except (json.JSONDecodeError, TypeError): p.charges_elementaires = []
+        p.passe_active = row['passe_active'] if 'passe_active' in row.keys() else 0
+        p.parade_absorb = row['parade_absorb'] if 'parade_absorb' in row.keys() else 0
+        p.last_action_type = row['last_action_type'] if 'last_action_type' in row.keys() else 'autre'
+        p.fureur_tribale_used = row['fureur_tribale_used'] if 'fureur_tribale_used' in row.keys() else 0
+        p.concentre = row['concentre'] if 'concentre' in row.keys() else 1
+        p.serment_actif = row['serment_actif'] if 'serment_actif' in row.keys() else 0
+        p.serment_bonus = row['serment_bonus'] if 'serment_bonus' in row.keys() else 0
+        p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
+        p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
+        p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
+        p.sentence_target_id = row['sentence_target_id'] if 'sentence_target_id' in row.keys() else 0
+        try:
+            p.sentence_targets = json.loads(row['sentence_targets']) if 'sentence_targets' in row.keys() and row['sentence_targets'] else ([p.sentence_target_id] if p.sentence_target_id else [])
+        except (json.JSONDecodeError, TypeError):
+            p.sentence_targets = [p.sentence_target_id] if p.sentence_target_id else []
+        p.passe_count = row['passe_count'] if 'passe_count' in row.keys() else 0
+        try: p.badges = json.loads(row['badges']) if 'badges' in row.keys() and row['badges'] else []
+        except (json.JSONDecodeError, TypeError): p.badges = []
+        p.charger_equipement()
+        return p
+
     def ajouter_effet(self, code, duree, puissance=None):
         if self.race == "Drakéide" and code in ["brulure", "gel"]:
             return
@@ -1477,7 +1526,8 @@ async def spe_autocomplete(interaction: discord.Interaction, current: str):
 async def sort_offensif_autocomplete(interaction: discord.Interaction, current: str):
     user_id = interaction.user.id
     is_gm_user = is_gm(user_id)
-    p = Personnage.charger(user_id)
+    nom_override = getattr(interaction.namespace, 'personnage', None)
+    p = Personnage.charger_par_nom(user_id, nom_override) if nom_override else Personnage.charger(user_id)
     if not p and not is_gm_user: return []
     choix = []
     for key, val in SKILLS_DB.items():
@@ -1492,7 +1542,8 @@ async def sort_offensif_autocomplete(interaction: discord.Interaction, current: 
 
 async def action_bonus_autocomplete(interaction: discord.Interaction, current: str):
     user_id = interaction.user.id
-    p = Personnage.charger(user_id)
+    nom_override = getattr(interaction.namespace, 'personnage', None)
+    p = Personnage.charger_par_nom(user_id, nom_override) if nom_override else Personnage.charger(user_id)
     
     # Si le joueur n'a pas de fiche, on ne propose rien
     if not p: return []
@@ -1513,12 +1564,27 @@ async def action_bonus_autocomplete(interaction: discord.Interaction, current: s
 async def sort_soin_autocomplete(interaction: discord.Interaction, current: str):
     user_id = interaction.user.id
     is_gm_user = is_gm(user_id)
-    p = Personnage.charger(user_id)
+    nom_override = getattr(interaction.namespace, 'personnage', None)
+    p = Personnage.charger_par_nom(user_id, nom_override) if nom_override else Personnage.charger(user_id)
     if not p and not is_gm_user: return []
+    # Pour les MJs sans override : compétences de toutes leurs fiches
+    if is_gm_user and not nom_override:
+        conn = get_db_connection()
+        toutes_fiches = conn.execute("SELECT competences FROM joueurs WHERE user_id = ?", (user_id,)).fetchall()
+        conn.close()
+        toutes_comps = set()
+        for fiche in toutes_fiches:
+            try: toutes_comps.update(json.loads(fiche['competences']))
+            except (json.JSONDecodeError, TypeError): pass
+        if p: toutes_comps.update(p.competences)
+    elif p:
+        toutes_comps = set(p.competences)
+    else:
+        toutes_comps = set()
     choix = []
     for key, val in SKILLS_DB.items():
         if val.get('type') != 'soin': continue
-        if not is_gm_user and p and key not in p.competences: continue
+        if key not in toutes_comps: continue
         if current.lower() in val['nom'].lower():
             choix.append(app_commands.Choice(name=val['nom'], value=key))
     return choix[:25]
@@ -1531,6 +1597,25 @@ async def stat_autocomplete(interaction: discord.Interaction, current: str):
     stats = {"phy": "Physique", "esp": "Esprit", "agi": "Agilité", "foi": "Foi", "int_stat": "Intelligence", "sag": "Sagesse", "const": "Constitution"}
     return [app_commands.Choice(name=nom, value=code) for code, nom in stats.items() if current.lower() in nom.lower()]
 
+async def tour_noms_autocomplete(interaction: discord.Interaction, current: str):
+    """Autocomplete pour /tour : liste tous les personnages actifs (sessions) sauf le joueur courant.
+    Retourne la valeur sous la forme 'user_id:nom' pour que /tour puisse charger le bon perso."""
+    conn = get_db_connection()
+    rows = conn.execute("""
+        SELECT j.user_id, j.nom, j.classe, j.niveau
+        FROM sessions s
+        JOIN joueurs j ON j.user_id = s.user_id AND j.nom = s.nom_perso_actif
+        WHERE (j.nom LIKE ? OR j.classe LIKE ?)
+        LIMIT 25
+    """, (f"%{current}%", f"%{current}%")).fetchall()
+    conn.close()
+    return [
+        app_commands.Choice(
+            name=f"{r['nom']} (Niv {r['niveau']} {r['classe'].capitalize()})",
+            value=f"{r['user_id']}:{r['nom']}"
+        )
+        for r in rows
+    ][:25]
 
 def resolve_sort_ref(sort: str) -> str:
     """Résout une ref de sort : accepte la ref directe OU le nom affiché (mobile).
@@ -2378,12 +2463,12 @@ def appliquer_cooldown(personnage: Personnage, sort_ref: str):
             personnage.cooldowns[sort_ref] = cd
 
 @bot.tree.command(name="action_bonus", description="⚡ Action rapide (Buff personnel, Soin, Drain)")
-@app_commands.describe(sort="La compétence à utiliser", description="Description RP", cible="[Optionnel] Ennemi pour les sorts de Drain")
-@app_commands.autocomplete(sort=action_bonus_autocomplete) 
-async def action_bonus(interaction: discord.Interaction, sort: str, description: str, cible: discord.Member = None):
+@app_commands.describe(sort="La compétence à utiliser", description="Description RP", cible="[Optionnel] Ennemi pour les sorts de Drain", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=action_bonus_autocomplete, personnage=joueur_perso_autocomplete)
+async def action_bonus(interaction: discord.Interaction, sort: str, description: str, cible: discord.Member = None, personnage: str = None):
     await interaction.response.defer() 
 
-    p: Personnage = Personnage.charger(interaction.user.id)
+    p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     # Si une cible est fournie (ex: pour Transfusion), on la charge, sinon on cible soi-même
     p_cible = Personnage.charger(cible.id) if cible else p
 
@@ -2557,7 +2642,14 @@ async def appliquer(interaction: discord.Interaction, cible: discord.Member, eff
 
 
 @bot.tree.command(name="tour", description="🔄 Début de tour : HUD + Gestion des Effets + Initiative")
-async def tour(interaction: discord.Interaction):
+@app_commands.describe(
+    perso1="Personnage supplémentaire 1 (pour le tableau d'initiative)",
+    perso2="Personnage supplémentaire 2",
+    perso3="Personnage supplémentaire 3",
+    perso4="Personnage supplémentaire 4",
+)
+@app_commands.autocomplete(perso1=tour_noms_autocomplete, perso2=tour_noms_autocomplete, perso3=tour_noms_autocomplete, perso4=tour_noms_autocomplete)
+async def tour(interaction: discord.Interaction, perso1: str = None, perso2: str = None, perso3: str = None, perso4: str = None):
     p: Personnage = Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
 
@@ -2915,16 +3007,89 @@ async def tour(interaction: discord.Interaction):
         embed.add_field(name="🚀 Initiative", value=f"**{score_init}**\n*({detail_init})*", inline=False)
         embed.set_footer(text="À vous ! (/attaque, /clash...)")
 
+    # --- TABLEAU D'INITIATIVE MULTI-PERSONNAGES ---
+    # On récupère les persos supplémentaires si spécifiés
+    perso_noms_args = [a for a in [perso1, perso2, perso3, perso4] if a]
+    if perso_noms_args:
+        # Entrées : liste de (personnage, score_init, detail_init)
+        entrees_init = [(p, score_init, detail_init)]
+        for arg in perso_noms_args:
+            # Format attendu : "user_id:nom" (depuis l'autocomplete)
+            if ":" in arg:
+                parts = arg.split(":", 1)
+                try:
+                    uid_extra = int(parts[0])
+                    nom_extra = parts[1]
+                    p_extra = Personnage.charger_par_nom(uid_extra, nom_extra)
+                except (ValueError, IndexError):
+                    p_extra = None
+            else:
+                # Fallback : cherche par nom parmi les sessions actives
+                conn = get_db_connection()
+                row = conn.execute("""
+                    SELECT j.user_id FROM sessions s
+                    JOIN joueurs j ON j.user_id = s.user_id AND j.nom = s.nom_perso_actif
+                    WHERE j.nom = ? LIMIT 1
+                """, (arg,)).fetchone()
+                conn.close()
+                p_extra = Personnage.charger(row['user_id']) if row else None
+
+            if not p_extra:
+                continue
+            # Calcul init du perso supplémentaire
+            agi_e = p_extra.agi if "root" not in p_extra.effets else 0
+            d_e = random.randint(1, 20)
+            if "hate" in p_extra.effets or p_extra.race == "Féral":
+                d_e2 = random.randint(1, 20)
+                d_e = max(d_e, d_e2)
+            score_e = d_e + agi_e
+            if p_extra.race == "Elfe" and p_extra.classe == "guerrier":
+                score_e += (p_extra.niveau // 3) * 2
+            detail_e = f"Dé {d_e} + Agi {agi_e}"
+            entrees_init.append((p_extra, score_e, detail_e))
+
+        # Tri par initiative croissante (ordre du tour)
+        entrees_init.sort(key=lambda x: x[1])
+
+        # Construction du tableau
+        lignes_tab = []
+        for rang, (px, sc, det) in enumerate(entrees_init, 1):
+            # Jauge PV compact
+            pct_pv = max(0, min(1, px.pv_actuel / px.pv_max)) if px.pv_max > 0 else 0
+            nb_pv = int(pct_pv * 5)
+            bar_pv = "🟩" * nb_pv + "⬛" * (5 - nb_pv)
+            pv_txt = f"{bar_pv} {px.pv_actuel}/{px.pv_max}"
+            # Jauge ressource compact
+            if px.classe == "mage":
+                pct_r = max(0, min(1, px.mana / px.mana_max)) if px.mana_max > 0 else 0
+                nb_r = int(pct_r * 5)
+                res_txt = "🟦" * nb_r + "⬛" * (5 - nb_r) + f" {px.mana}"
+            elif px.classe == "guerrier":
+                res_txt = f"🔴×{px.tension}"
+            elif px.classe == "pretre":
+                pct_r = max(0, min(1, px.ferveur / 100)) if px.ferveur <= 100 else 1
+                nb_r = int(pct_r * 5)
+                res_txt = "🟨" * nb_r + "⬛" * (5 - nb_r) + f" {px.ferveur}"
+            else:
+                res_txt = "—"
+            stun_ico = "💫" if ("stun" in px.effets or "gel" in px.effets) else ""
+            lignes_tab.append(
+                f"**{rang}. {px.nom}** {stun_ico} — Init **{sc}** *({det})*\n"
+                f"└ PV: {pv_txt} | Res: {res_txt}"
+            )
+        tab_txt = "\n".join(lignes_tab)
+        embed.add_field(name="📋 Ordre du Tour (croissant)", value=tab_txt, inline=False)
+
     await log_combat(interaction, embed)
     await interaction.response.send_message(embed=embed)
 
 
 # 1. SOIN
 @bot.tree.command(name="soigner", description="🙏 Soigner une cible")
-@app_commands.describe(sort="Le sort de soin", cible="Le joueur à soigner")
-@app_commands.autocomplete(sort=sort_soin_autocomplete)
-async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Member):
-    p: Personnage = Personnage.charger(interaction.user.id)
+@app_commands.describe(sort="Le sort de soin", cible="Le joueur à soigner", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=sort_soin_autocomplete, personnage=joueur_perso_autocomplete)
+async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Member, personnage: str = None):
+    p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
     dispo, msg_err = verifier_cooldown(p, sort)
     if not dispo:
@@ -3056,11 +3221,11 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Me
 
 # 2. CLASH
 @bot.tree.command(name="clash", description="un adversaire vous attaque et vous l'attaquez en retour")
-@app_commands.describe(sort="Votre technique", cible="L'adversaire", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete)
-async def clash(interaction: discord.Interaction, sort: str, cible: discord.Member, description: str, cibles_secondaires: str = None):
+@app_commands.describe(sort="Votre technique", cible="L'adversaire", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete)
+async def clash(interaction: discord.Interaction, sort: str, cible: discord.Member, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
-    p_attaquant = Personnage.charger(interaction.user.id)
+    p_attaquant = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p_attaquant: return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
     if p_attaquant.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
 
@@ -3180,17 +3345,17 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
 
 # 3. RIPOSTE (Modifié avec Races & Calculs Dégâts)
 @bot.tree.command(name="riposte", description="Répondre à la commande /clash d'un adversaire")
-@app_commands.describe(sort="Votre technique", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete)
-async def riposte(interaction: discord.Interaction, sort: str, description: str, cibles_secondaires: str = None):
+@app_commands.describe(sort="Votre technique", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete)
+async def riposte(interaction: discord.Interaction, sort: str, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
     user_id = interaction.user.id
     if user_id not in PENDING_CLASHES: return await interaction.followup.send("❌ Personne ne vous a défié.", ephemeral=True)
     
     clash_data = PENDING_CLASHES.pop(user_id)
-    p_defenseur: Personnage = Personnage.charger(user_id)
-    p_attaquant: Personnage = clash_data['p_attaquant'] # <-- Maintenant il sait !
-    skill_a_org: Skill = clash_data['skill_a'] # Ton éditeur saura que c'est une technique !
+    p_defenseur: Personnage = Personnage.charger_par_nom(user_id, personnage) if personnage else Personnage.charger(user_id)
+    p_attaquant: Personnage = clash_data['p_attaquant']
+    skill_a_org: Skill = clash_data['skill_a']
 
     # --- VÉRIFICATIONS DÉFENSEUR ---
     if p_defenseur.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
@@ -3564,11 +3729,11 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         
 # 4. ATTAQUE 
 @bot.tree.command(name="attaque", description="Attaque")
-@app_commands.describe(sort="Votre technique", cible="L'adversaire", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete)
-async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Member, description: str, cibles_secondaires: str = None):
+@app_commands.describe(sort="Votre technique", cible="L'adversaire", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete)
+async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Member, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
-    p: Personnage = Personnage.charger(interaction.user.id)
+    p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if interaction.user.id == cible.id:
         p_cible = p 
     else:
@@ -3939,13 +4104,14 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Me
 
 # 5. DEFENSE (Modifiée - Réduction Passive)
 @bot.tree.command(name="defense", description="Se défendre : Mitigation ou Esquive")
-@app_commands.describe(type_def="Encaisser ou Esquiver", degats_subis="Dégâts à subir", ressource_spend="Mana/Tension/Ferveur à dépenser", perce_armure="Mettre sur Vrai si l'attaque adverse ignore l'armure")
+@app_commands.describe(type_def="Encaisser ou Esquiver", degats_subis="Dégâts à subir", ressource_spend="Mana/Tension/Ferveur à dépenser", perce_armure="Mettre sur Vrai si l'attaque adverse ignore l'armure", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(personnage=joueur_perso_autocomplete)
 @app_commands.choices(type_def=[
     app_commands.Choice(name="🛡️ Encaisser", value="tank"),
     app_commands.Choice(name="🏃 Esquive (Risque x1.5 dégâts)", value="esquive")
 ])
-async def defense(interaction: discord.Interaction, type_def: app_commands.Choice[str], degats_subis: int, ressource_spend: int = 0, perce_armure: bool = False):
-    p: Personnage = Personnage.charger(interaction.user.id)
+async def defense(interaction: discord.Interaction, type_def: app_commands.Choice[str], degats_subis: int, ressource_spend: int = 0, perce_armure: bool = False, personnage: str = None):
+    p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("Pas de fiche.", ephemeral=True)
     if p.pv_actuel <= 0: return await interaction.response.send_message("💀 K.O.", ephemeral=True)
 
@@ -5179,6 +5345,20 @@ async def my_perso_autocomplete(interaction: discord.Interaction, current: str):
     conn.close()
     
     return [app_commands.Choice(name=p['nom'], value=p['nom']) for p in personnages][:25]
+
+async def joueur_perso_autocomplete(interaction: discord.Interaction, current: str):
+    """Autocomplete listant toutes les fiches du joueur (pour les commandes de combat multi-perso MJ)."""
+    user_id = interaction.user.id
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT nom, classe, niveau FROM joueurs WHERE user_id = ? AND nom LIKE ? ORDER BY nom",
+        (user_id, f"%{current}%")
+    ).fetchall()
+    conn.close()
+    return [
+        app_commands.Choice(name=f"{r['nom']} (Niv {r['niveau']} {r['classe'].capitalize()})", value=r['nom'])
+        for r in rows
+    ][:25]
 
 @bot.tree.command(name="mes_persos", description="Afficher la liste de tous vos personnages")
 async def mes_persos(interaction: discord.Interaction):
