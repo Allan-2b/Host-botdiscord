@@ -2666,13 +2666,25 @@ async def appliquer(interaction: discord.Interaction, cible: discord.Member, eff
 
 @bot.tree.command(name="tour", description="🔄 Début de tour : HUD + Gestion des Effets + Initiative")
 @app_commands.describe(
-    perso1="Personnage supplémentaire 1 (pour le tableau d'initiative)",
+    perso1="Personnage supplémentaire 1",
     perso2="Personnage supplémentaire 2",
     perso3="Personnage supplémentaire 3",
     perso4="Personnage supplémentaire 4",
+    perso5="Personnage supplémentaire 5",
+    perso6="Personnage supplémentaire 6",
+    perso7="Personnage supplémentaire 7",
+    perso8="Personnage supplémentaire 8",
+    perso9="Personnage supplémentaire 9",
 )
-@app_commands.autocomplete(perso1=tour_noms_autocomplete, perso2=tour_noms_autocomplete, perso3=tour_noms_autocomplete, perso4=tour_noms_autocomplete)
-async def tour(interaction: discord.Interaction, perso1: str = None, perso2: str = None, perso3: str = None, perso4: str = None):
+@app_commands.autocomplete(
+    perso1=tour_noms_autocomplete, perso2=tour_noms_autocomplete, perso3=tour_noms_autocomplete,
+    perso4=tour_noms_autocomplete, perso5=tour_noms_autocomplete, perso6=tour_noms_autocomplete,
+    perso7=tour_noms_autocomplete, perso8=tour_noms_autocomplete, perso9=tour_noms_autocomplete,
+)
+async def tour(interaction: discord.Interaction,
+               perso1: str = None, perso2: str = None, perso3: str = None,
+               perso4: str = None, perso5: str = None, perso6: str = None,
+               perso7: str = None, perso8: str = None, perso9: str = None):
     p: Personnage = Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
 
@@ -3018,7 +3030,7 @@ async def tour(interaction: discord.Interaction, perso1: str = None, perso2: str
     # Le joueur courant est toujours inclus, + les persos supplémentaires
     entrees_init = [(p, score_init, detail_init, skip_turn)]
 
-    perso_noms_args = [a for a in [perso1, perso2, perso3, perso4] if a]
+    perso_noms_args = [a for a in [perso1, perso2, perso3, perso4, perso5, perso6, perso7, perso8, perso9] if a]
     for arg in perso_noms_args:
         if ":" in arg:
             parts = arg.split(":", 1)
