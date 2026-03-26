@@ -4947,6 +4947,9 @@ async def pigeon(interaction: discord.Interaction, joueur: discord.Member, messa
     app_commands.Choice(name="💚 PV Actuels", value="pv_actuel"),
     app_commands.Choice(name="🔵 Mana Maximum", value="mana_max"),
     app_commands.Choice(name="🔵 Mana Actuel", value="mana"),
+    app_commands.Choice(name="🟨 Ferveur", value="ferveur"),
+    app_commands.Choice(name="📖 Versets", value="versets"),
+    app_commands.Choice(name="🔴 Tension", value="tension"),
     app_commands.Choice(name="💪 Physique (Force)", value="phy"),
     app_commands.Choice(name="🛡️ Constitution", value="const"),
     app_commands.Choice(name="💨 Agilité", value="agi"),
@@ -4955,6 +4958,16 @@ async def pigeon(interaction: discord.Interaction, joueur: discord.Member, messa
     app_commands.Choice(name="🙏 Foi", value="foi"),
     app_commands.Choice(name="🦉 Sagesse", value="sag"),
     app_commands.Choice(name="🧱 Robustesse (Armure/Items)", value="robustesse"),
+    app_commands.Choice(name="⭐ Niveau", value="niveau"),
+    app_commands.Choice(name="🎯 Points Stat", value="points_stat"),
+    app_commands.Choice(name="🎯 Points Compétence", value="points_comp"),
+    app_commands.Choice(name="🎯 Points Attribut", value="points_attribut"),
+    app_commands.Choice(name="💰 Monnaie (bronze)", value="monnaie"),
+    app_commands.Choice(name="🗣️ Oral", value="oral"),
+    app_commands.Choice(name="👻 Discrétion", value="discretion"),
+    app_commands.Choice(name="🤸 Acrobatie", value="acrobatie"),
+    app_commands.Choice(name="💪 Force RP", value="force_rp"),
+    app_commands.Choice(name="🏕️ Survie", value="survie"),
 ])
 async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[str], valeur: int):
     # 1. Chargement
@@ -5028,6 +5041,92 @@ async def personnalisation(interaction: discord.Interaction, alias: str = None, 
     await interaction.response.send_message(embed=embed)
 
 
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VIEW — Menu déroulant des techniques (affiché depuis /fiche)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TechniquesSelect(discord.ui.Select):
+    def __init__(self, p):
+        self.p_data = p
+
+        dons_raciaux = {
+            "Elfe": "Sagesse Ancestrale", "Humain": "Adaptabilité", "Nain": "Peau de Pierre",
+            "Drakéide": "Sang de Dragon", "Féral": "Instinct Animal", "Céleste": "Grâce Divine",
+            "Vampire": "Soif de Sang"
+        }
+
+        # Catégories disponibles selon ce que le perso possède
+        categories = {}
+        if p.race in dons_raciaux:
+            categories["🧬 Don Racial"] = [f"🧬 {dons_raciaux[p.race]}"]
+
+        passifs, actifs, bonus_list, soins = [], [], [], []
+        for skill_key in p.competences:
+            if skill_key not in SKILLS_DB:
+                continue
+            d = SKILLS_DB[skill_key]
+            nom = d["nom"]
+            cout = f" ({d['cout']} {d['cout_type']})" if d.get("cout", 0) > 0 else ""
+            if d.get("type") == "passif":
+                passifs.append(f"🛡️ {nom}")
+            elif d.get("type") == "soin":
+                soins.append(f"💚 {nom}{cout}")
+            elif "(BONUS)" in nom.upper():
+                bonus_list.append(f"⚡ {nom}{cout}")
+            else:
+                actifs.append(f"🔹 {nom}{cout}")
+
+        if passifs:   categories["✨ Passifs"] = passifs
+        if actifs:    categories["⚔️ Techniques actives"] = actifs
+        if bonus_list:categories["⚡ Actions Bonus"] = bonus_list
+        if soins:     categories["💚 Soins"] = soins
+
+        self.categories = categories
+
+        options = [
+            discord.SelectOption(label=cat, value=cat, description=f"{len(lst)} élément(s)")
+            for cat, lst in categories.items()
+        ]
+        if not options:
+            options = [discord.SelectOption(label="Aucune technique", value="none")]
+
+        super().__init__(
+            placeholder="📖 Choisir une catégorie de techniques...",
+            min_values=1,
+            max_values=1,
+            options=options[:25],
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        choix = self.values[0]
+        if choix == "none":
+            return await interaction.response.send_message("Aucune technique enregistrée.", ephemeral=True)
+        liste = self.categories.get(choix, [])
+        # Découpe en blocs de 1024 chars max (limite Discord field)
+        blocs = []
+        current = ""
+        for ligne in liste:
+            if len(current) + len(ligne) + 1 > 1020:
+                blocs.append(current)
+                current = ligne
+            else:
+                current += ("\n" if current else "") + ligne
+        if current:
+            blocs.append(current)
+
+        embed = discord.Embed(title=choix, color=0x9b59b6)
+        for i, bloc in enumerate(blocs):
+            embed.add_field(name="​" if i > 0 else choix, value=bloc, inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class FicheTechniquesView(discord.ui.View):
+    def __init__(self, p):
+        super().__init__(timeout=120)
+        self.add_item(TechniquesSelect(p))
 
 
 @bot.tree.command(name="fiche", description="Voir votre fiche complète (Design Remasterisé)")
@@ -5148,37 +5247,8 @@ async def fiche(interaction: discord.Interaction):
     bronze_p = p.monnaie % 10
     embed.add_field(name="💰 Bourse", value=f"**{or_p}** 🥇 | **{argent_p}** 🥈 | **{bronze_p}** 🥉", inline=False)
 
-    # --- H. GRIMOIRE (SORTS) ---
-    skills_actifs = []
-    skills_passifs = []
-
-    # 1. Rappel du Don Racial (uniquement le nom)
-    dons_raciaux = {
-        "Elfe": "Sagesse Ancestrale", "Humain": "Adaptabilité", "Nain": "Peau de Pierre",
-        "Drakéide": "Sang de Dragon", "Féral": "Instinct Animal", "Céleste": "Grâce Divine",
-        "Vampire": "Soif de Sang"
-    }
-    if p.race in dons_raciaux:
-        skills_passifs.append(f"🧬 {dons_raciaux[p.race]}")
-
-    # 2. Tri des compétences apprises
-    for skill_key in p.competences:
-        if skill_key in SKILLS_DB:
-            d = SKILLS_DB[skill_key]
-            if d.get('type') == 'passif':
-                skills_passifs.append(f"🛡️ {d['nom']}")
-            else:
-                cout = f" ({d['cout']})" if d['cout'] > 0 else ""
-                skills_actifs.append(f"🔹 {d['nom']}{cout}")
-
-    # Affichage du rappel des passifs en premier pour la visibilité
-    if skills_passifs:
-        embed.add_field(name="✨ Passifs", value="\n".join(skills_passifs), inline=False)
-
-    if skills_actifs:
-        embed.add_field(name="⚔️ Techniques ", value="\n".join(skills_actifs), inline=False)
-
-
+    # --- H. GRIMOIRE (SORTS) — affiché via menu déroulant ---
+    # (Les techniques sont accessibles via le bouton ci-dessous)
 
     # --- I. TEMPS DE RECHARGE (COOLDOWNS) ---
     if p.cooldowns:
@@ -5220,7 +5290,9 @@ async def fiche(interaction: discord.Interaction):
         embed.add_field(name="🧬 États Actuels", value="\n".join(txt_effets), inline=False)
     embed.set_footer(text=txt_footer, icon_url=interaction.user.display_avatar.url)
 
-    await interaction.response.send_message(embed=embed)
+    # --- VIEW avec bouton "Voir les techniques" ---
+    view = FicheTechniquesView(p)
+    await interaction.response.send_message(embed=embed, view=view)
 
 
 
