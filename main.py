@@ -5858,6 +5858,166 @@ async def desequiper(interaction: discord.Interaction, item_id: int):
 
 
 
+@bot.tree.command(name="equipement", description="🎒 Voir et gérer votre équipement par slots")
+async def equipement(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    p = Personnage.charger(user_id)
+    if not p:
+        return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
+
+    conn = get_db_connection()
+    items = conn.execute("""
+        SELECT i.id, c.ref, c.nom, c.slot, c.description, i.equipe
+        FROM inventaire i
+        JOIN config_items c ON i.item_ref = c.ref
+        WHERE i.user_id = ?
+        ORDER BY c.slot, i.equipe DESC
+    """, (user_id,)).fetchall()
+    conn.close()
+
+    SLOTS = [
+        ("arme",     "⚔️",  "Arme",          1),
+        ("collier",  "📿",  "Collier/Amulette", 1),
+        ("anneau",   "💍",  "Bague/Anneau",   2),
+        ("armure",   "🛡️",  "Armure",         1),
+        ("cape",     "🧥",  "Cape",           1),
+        ("ceinture", "🧵",  "Ceinture",       1),
+    ]
+
+    # Indexer les items par slot
+    items_par_slot = {}
+    items_sac = []
+    for item in items:
+        slot = item['slot']
+        if slot not in items_par_slot:
+            items_par_slot[slot] = {"equipes": [], "sac": []}
+        if item['equipe'] == 1:
+            items_par_slot[slot]["equipes"].append(item)
+        else:
+            items_sac.append(item)
+
+    # --- EMBED PRINCIPAL ---
+    embed = discord.Embed(title=f"🧳 Équipement de {p.nom}", color=0xe67e22)
+
+    # Slots équipés
+    slots_txt = ""
+    for slot_key, ico, slot_nom, max_slots in SLOTS:
+        data = items_par_slot.get(slot_key, {"equipes": [], "sac": []})
+        equipes = data["equipes"]
+        if equipes:
+            for it in equipes:
+                slots_txt += f"{ico} **{slot_nom}** : {it['nom']} *(ID {it['id']})*\n"
+        else:
+            slots_txt += f"{ico} **{slot_nom}** : *— vide —*\n"
+
+    embed.add_field(name="⚔️ Objets Équipés", value=slots_txt, inline=False)
+
+    # Sac
+    if items_sac:
+        sac_txt = ""
+        for it in items_sac:
+            ico_sac = {"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵"}.get(it['slot'], "🔸")
+            sac_txt += f"{ico_sac} **{it['nom']}** *(ID {it['id']})* — {it['description']}\n"
+        embed.add_field(name="🎒 Dans le sac", value=sac_txt, inline=False)
+    else:
+        embed.add_field(name="🎒 Dans le sac", value="*Vide.*", inline=False)
+
+    # --- MENUS DÉROULANTS ---
+    class EquipView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=120)
+            # Menu Équiper — items dans le sac
+            if items_sac:
+                options_equip = [
+                    discord.SelectOption(
+                        label=f"{it['nom']} ({it['slot']})",
+                        value=str(it['id']),
+                        description=it['description'][:100] if it['description'] else "",
+                        emoji={"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵"}.get(it['slot'], "🔸")
+                    )
+                    for it in items_sac[:25]
+                ]
+                self.add_item(EquipSelect(options_equip))
+
+            # Menu Déséquiper — items équipés
+            items_equipes = [it for it in items if it['equipe'] == 1]
+            if items_equipes:
+                options_desequip = [
+                    discord.SelectOption(
+                        label=f"Retirer : {it['nom']} ({it['slot']})",
+                        value=str(it['id']),
+                        emoji={"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵"}.get(it['slot'], "🔸")
+                    )
+                    for it in items_equipes[:25]
+                ]
+                self.add_item(DesequipSelect(options_desequip))
+
+    class EquipSelect(discord.ui.Select):
+        def __init__(self, options):
+            super().__init__(placeholder="✅ Équiper un objet...", options=options, row=0)
+
+        async def callback(self, interaction: discord.Interaction):
+            item_id = int(self.values[0])
+            conn2 = get_db_connection()
+            target = conn2.execute("""
+                SELECT i.item_ref, c.slot, c.nom, c.description, i.equipe
+                FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
+                WHERE i.id = ? AND i.user_id = ?
+            """, (item_id, interaction.user.id)).fetchone()
+
+            if not target:
+                conn2.close()
+                return await interaction.response.send_message("❌ Objet introuvable.", ephemeral=True)
+
+            slot_vise = target['slot']
+            limit = 2 if slot_vise == "anneau" else 1
+            count = conn2.execute("""
+                SELECT COUNT(*) FROM inventaire i
+                JOIN config_items c ON i.item_ref = c.ref
+                WHERE i.user_id = ? AND i.equipe = 1 AND c.slot = ?
+            """, (interaction.user.id, slot_vise)).fetchone()[0]
+
+            if count >= limit:
+                if slot_vise == "anneau":
+                    conn2.close()
+                    return await interaction.response.send_message("✋ 2 anneaux déjà équipés. Retirez-en un d'abord.", ephemeral=True)
+                else:
+                    conn2.execute("""
+                        UPDATE inventaire SET equipe = 0
+                        WHERE user_id = ? AND equipe = 1
+                        AND item_ref IN (SELECT ref FROM config_items WHERE slot = ?)
+                    """, (interaction.user.id, slot_vise))
+
+            conn2.execute("UPDATE inventaire SET equipe = 1 WHERE id = ?", (item_id,))
+            conn2.commit()
+            conn2.close()
+            await interaction.response.send_message(f"✅ **{target['nom']}** équipé !\n⚠️ Ajustez vos stats avec `/set_stat` si besoin.", ephemeral=True)
+
+    class DesequipSelect(discord.ui.Select):
+        def __init__(self, options):
+            super().__init__(placeholder="❌ Retirer un objet équipé...", options=options, row=1)
+
+        async def callback(self, interaction: discord.Interaction):
+            item_id = int(self.values[0])
+            conn2 = get_db_connection()
+            target = conn2.execute("""
+                SELECT c.nom FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
+                WHERE i.id = ? AND i.user_id = ?
+            """, (item_id, interaction.user.id)).fetchone()
+            if not target:
+                conn2.close()
+                return await interaction.response.send_message("❌ Objet introuvable.", ephemeral=True)
+            conn2.execute("UPDATE inventaire SET equipe = 0 WHERE id = ?", (item_id,))
+            conn2.commit()
+            conn2.close()
+            await interaction.response.send_message(f"🎒 **{target['nom']}** retiré.", ephemeral=True)
+
+    has_items = len(items) > 0
+    view = EquipView() if has_items else None
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+
 
 #-------------------------------------------------------------------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------------------------------------------------------------------
