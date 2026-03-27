@@ -829,7 +829,7 @@ def populate_spells():
         # --- PASSIFS ---
         ("passif_nord_peau",      "[Peau de Pierre] (Passif)",     '["clan_nord"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "+2 Robustesse permanente.", "passif", "spe", '{"passif": "nord_peau", "rob_bonus": 2}'),
         ("passif_nord_machoire",  "[Mâchoire de Fer] (Passif)",    '["clan_nord"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Poison/Brûlure n'appliquent dégâts que tous les 2 tours.", "passif", "spe", '{"passif": "nord_machoire"}'),
-        ("passif_nord_fureur",    "[Fureur Tribale] (Passif)",     '["clan_nord"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "+2 Tension une fois quand <50% PV. fureur_tribale_used DB.", "passif", "spe", '{"passif": "nord_fureur"}'),
+        # [Fureur Tribale supprimée]
         ("passif_nord_fer",       "[Corps de Fer] (Passif)",       '["clan_nord"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "Serment bonus max +10 / +15 sous 30% PV.", "passif", "spe", '{"passif": "nord_fer"}'),
         ("passif_nord_indestructible","[L'Indestructible] (Passif)",'["clan_nord"]', 5, 5, 0,0,0,"phy",0,"tension",0,0, "+5 PV au Serment. Une survie à 1 PV par combat.", "passif", "spe", '{"passif": "nord_indestructible"}'),
         # P1
@@ -3662,7 +3662,28 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         )
         
         if cibles_sec_gagnant and (data_gagnant.get("aoe") or data_gagnant.get("ricochet")):
-            embed_fin.add_field(name="ATTAQUE AOE/RICOCHET", value=f"{cibles_sec_gagnant},\n👉 **Utilisez `/defense` contre {damage_final} dégâts !**", inline=False)
+            embed_fin.add_field(name="💥 ATTAQUE AOE/RICOCHET", value=f"{cibles_sec_gagnant},\n👉 **Utilisez `/defense` contre {damage_final} dégâts !**", inline=False)
+
+    # --- AoE ATTAQUANT même si perdant (effets de zone toujours appliqués) ---
+    # Si l'attaquant avait une AoE et a perdu le clash, les cibles secondaires
+    # reçoivent quand même les dégâts de base du sort (sans les pièces restantes)
+    elif vainqueur is None or vainqueur == p_defenseur:
+        cibles_sec_atq = clash_data.get('cibles_sec_a')
+        if cibles_sec_atq:
+            ref_a = clash_data.get('ref_a')
+            if ref_a and ref_a in SKILLS_DB:
+                data_a = {}
+                try: data_a = json.loads(SKILLS_DB[ref_a].get('data_json', '{}'))
+                except: data_a = {}
+                if data_a.get("aoe") or data_a.get("ricochet"):
+                    # Dégâts de base du sort (sans pièces — clash perdu)
+                    skill_a_base = clash_data.get('skill_a')
+                    dmg_zone = getattr(skill_a_base, 'base', 0) if skill_a_base else 0
+                    embed_fin.add_field(
+                        name="💥 ZONE ATTAQUANT (clash perdu — dégâts de base)",
+                        value=f"{cibles_sec_atq},\n👉 **Utilisez `/defense` contre {dmg_zone} dégâts** (dégâts de base, clash perdu) !",
+                        inline=False
+                    )
 
         embed_fin.add_field(name="Action", value=f"👉 **<@{perdant.user_id}>**, utilisez `/defense` !", inline=False)
         
@@ -4252,9 +4273,7 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
         if "clan_nord" in p.sous_classes_unlocked and p.serment_actif:
             calculer_serment(p, degats_finaux)
 
-        # --- FUREUR TRIBALE (Clan du Nord) : passage sous 50% ---
-        msg_fureur = appliquer_fureur_tribale(p, pv_avant_v4, degats_finaux)
-        if msg_fureur: msg_v4_def += f"\n{msg_fureur}"
+        # [Fureur Tribale supprimée]
 
         # --- LE DERNIER REMPART (Légion P5) : <20% PV → Posture auto + Tension ---
         if "passif_legion_rempart_final" in p.competences and p.posture_active == 0:
@@ -5302,6 +5321,42 @@ async def fin_combat(interaction: discord.Interaction):
         msg += "\n📜 **Inquisiteur** : Sentence(s) levée(s)."
     
     
+    # --- LIQUIDATION DES EFFETS DoT RÉSIDUELS ---
+    dot_msg = ""
+    dot_total = 0
+    effets_dot = ["brulure", "hemorragie", "poison"]
+    effets_a_suppr = []
+    for code in list(p.effets.keys()):
+        data = p.effets[code]
+        if code == "brulure":
+            degats = data.get("valeur", data.get("duree", 0))
+            dot_total += degats
+            dot_msg += f"\n🔥 **Brûlure** résiduelle : -{degats} PV"
+            effets_a_suppr.append(code)
+        elif code == "hemorragie":
+            valeur = data.get("valeur", 0)
+            degats = max(1, valeur // 2)
+            dot_total += degats
+            dot_msg += f"\n🩸 **Hémorragie** résiduelle : -{degats} PV"
+            effets_a_suppr.append(code)
+        elif code == "poison":
+            malus = (5 + p.niveau) // 5
+            dot_msg += f"\n☠️ **Poison** résiduel dissipé (malus {malus} retiré)"
+            effets_a_suppr.append(code)
+        elif code not in ["_indestructible_used", "_rempart_used", "_kill_relancer_dispo",
+                          "_status_si_clash_gagne", "_retour_marge_3", "_bonus_marquage_avance"]:
+            effets_a_suppr.append(code)
+
+    for code in effets_a_suppr:
+        p.effets.pop(code, None)
+
+    if dot_total > 0:
+        p.pv_actuel = max(0, p.pv_actuel - dot_total)
+        dot_msg += f"\n💥 **Total dégâts de fin** : -{dot_total} PV"
+
+    if dot_msg:
+        msg += f"\n\n**☠️ Effets résiduels liquidés :**{dot_msg}"
+
     p.sauvegarder()
     embed = discord.Embed(title="Fin de Combat", description=msg, color=0x95a5a6)
     await interaction.response.send_message(embed=embed)
@@ -6379,10 +6434,15 @@ async def gm_freestyle(
     
     reload_data()
     
-    # 4. Ajout direct à la fiche du monstre incarné
+    # 4. Ajout direct à la fiche du monstre incarné (uniquement si c'est bien un monstre)
     p: Personnage = Personnage.charger(interaction.user.id)
-    p.competences.append(unique_id)
-    p.sauvegarder()
+    if p:
+        if p.classe == "monstre":
+            p.competences.append(unique_id)
+            p.sauvegarder()
+        else:
+            # Le MJ a une fiche joueur active — ne pas lui ajouter le sort de monstre
+            pass
 
     # 5. Affichage
     embed = discord.Embed(title="⚡ Compétence Créée & Équipée !", color=0xE67E22)
