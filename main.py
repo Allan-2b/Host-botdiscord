@@ -3664,6 +3664,10 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         if cibles_sec_gagnant and (data_gagnant.get("aoe") or data_gagnant.get("ricochet")):
             embed_fin.add_field(name="💥 ATTAQUE AOE/RICOCHET", value=f"{cibles_sec_gagnant},\n👉 **Utilisez `/defense` contre {damage_final} dégâts !**", inline=False)
 
+        embed_fin.add_field(name="Action", value=f"👉 **<@{perdant.user_id}>**, utilisez `/defense` !", inline=False)
+        await log_combat(interaction, embed_fin)
+        await interaction.followup.send(embed=embed_fin)
+
     # --- AoE ATTAQUANT même si perdant (effets de zone toujours appliqués) ---
     # Si l'attaquant avait une AoE et a perdu le clash, les cibles secondaires
     # reçoivent quand même les dégâts de base du sort (sans les pièces restantes)
