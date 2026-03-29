@@ -1601,14 +1601,17 @@ async def stat_autocomplete(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=nom, value=code) for code, nom in stats.items() if current.lower() in nom.lower()]
 
 async def tour_noms_autocomplete(interaction: discord.Interaction, current: str):
-    """Autocomplete pour /tour : liste tous les personnages actifs (sessions) sauf le joueur courant.
+    """Autocomplete pour /tour : liste tous les personnages de tous les joueurs en session.
+    Inclut toutes les fiches (pas seulement la fiche active) pour permettre au MJ d'ajouter ses PNJ.
     Retourne la valeur sous la forme 'user_id:nom' pour que /tour puisse charger le bon perso."""
     conn = get_db_connection()
+    # On récupère tous les joueurs ayant une session active, puis TOUTES leurs fiches
     rows = conn.execute("""
-        SELECT j.user_id, j.nom, j.classe, j.niveau
-        FROM sessions s
-        JOIN joueurs j ON j.user_id = s.user_id AND j.nom = s.nom_perso_actif
-        WHERE (j.nom LIKE ? OR j.classe LIKE ?)
+        SELECT DISTINCT j.user_id, j.nom, j.classe, j.niveau
+        FROM joueurs j
+        WHERE j.user_id IN (SELECT user_id FROM sessions)
+        AND (j.nom LIKE ? OR j.classe LIKE ?)
+        ORDER BY j.user_id, j.nom
         LIMIT 25
     """, (f"%{current}%", f"%{current}%")).fetchall()
     conn.close()
