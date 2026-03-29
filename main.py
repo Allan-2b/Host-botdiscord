@@ -4796,7 +4796,8 @@ async def mj_presage(interaction: discord.Interaction, joueur: discord.Member, v
     p.ferveur += gain
     # Poser le flag _presage_exact pour activer les bonus conditionnels des sorts Oracle
     if verdict.value == "exact":
-        p.effets["_presage_exact"] = {"duree": 1, "valeur": 1}
+        # duree:2 pour survivre au /tour du round courant et être actif au tour suivant
+        p.effets["_presage_exact"] = {"duree": 2, "valeur": 1}
     else:
         p.effets.pop("_presage_exact", None)
     p.sauvegarder()
