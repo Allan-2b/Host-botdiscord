@@ -2569,10 +2569,7 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
         visuel.append(f"🙏(+{heads} Ferv)")
 
     if skill_obj.coins > skill_data["coins"]: visuel.append("⚡(+2 Pièces)")
-    if "poison" in p.effets:
-        malus = (5 + p.niveau) // 5
-        total -= malus
-        visuel.append(f"☠️(-{malus} Psn)")
+    # Poison non appliqué sur Action Bonus (exemption volontaire)
 
     json_data = skill_data.get('data_json', '{}')
     total, msg_effets_spe = traiter_effets_json(json_data, p, p_cible, total, heads=heads)
