@@ -370,7 +370,8 @@ def get_serment_bonus(p: 'Personnage') -> int:
     return p.serment_bonus
 
 def calculer_serment(p: 'Personnage', degats_subis: int):
-    """Met à jour le bonus Serment après réception de dégâts."""
+    """Accumule le bonus Serment : +1 par tranche de 10 PV reçus (min +1).
+    Le bonus STACKS indéfiniment jusqu'au max. Rien ne le consomme."""
     if not p.serment_actif: return
     seuil_30 = p.pv_max * 0.3
     max_bonus = 10 if "passif_nord_fer" in p.competences else 8
@@ -378,7 +379,8 @@ def calculer_serment(p: 'Personnage', degats_subis: int):
     if p.pv_actuel <= seuil_30:
         p.serment_bonus = max_bas
     else:
-        p.serment_bonus = min(max_bonus, round(degats_subis / 5))
+        gain = max(1, degats_subis // 10)
+        p.serment_bonus = min(max_bonus, p.serment_bonus + gain)
 
 def appliquer_fureur_tribale(p: 'Personnage', pv_avant: int, degats: int) -> str:
     """Vérifie et applique la Fureur Tribale (passage sous 50% PV). Retourne message."""
@@ -1936,7 +1938,8 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         msg.append("🛡️ **Posture** : Armure ignorée !")
     if data.get("ignore_rob_si_presage") and attaquant.effets.get("_presage_exact"):
         attaquant._ignore_rob = True
-        msg.append("🔮 **Présage exact** : Robustesse ignorée !")
+        attaquant.effets.pop("_presage_exact", None)
+        msg.append("🔮 **Présage exact consommé** : Robustesse ignorée !")
     if data.get("ignore_armor_si_condamne") and defenseur and defenseur.user_id in attaquant.sentence_targets:
         attaquant._ignore_armor = True
         msg.append("📜 **Sentence** : Armure ignorée !")
@@ -2129,12 +2132,11 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         degats_finaux = data["degats_fixes"]
         msg.append(f"⚔️ **Dégâts Fixes** : {degats_finaux} (précision garantie).")
 
-    # -- BONUS SORTS GUERRIER SI SERMENT --
+    # -- BONUS SORTS GUERRIER SI SERMENT (le bonus ne se consomme pas) --
     if data.get("apply_serment_bonus") and attaquant.serment_actif:
         bonus_s = get_serment_bonus(attaquant)
         if bonus_s > 0:
             degats_finaux += bonus_s
-            attaquant.serment_bonus = 0
             msg.append(f"🩸 **Serment du Sang** : +{bonus_s} Base !")
 
     # -- SENTENCE (INQUISITEUR) -- bonus statut + dégâts conditionnels
@@ -2157,8 +2159,16 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
                 degats_finaux += 9999
                 msg.append(f"📜⚔️ **EXÉCUTION INQUISITORIALE** : Cible Condamnée sous {data['execute_percent_si_condamne']}% PV !")
 
-    # -- ORACLE : bonus si présage exact ce tour --
+    # -- ORACLE : bonus si présage exact — consommé à l'usage --
     presage_exact = bool(attaquant.effets.get("_presage_exact"))
+    sort_utilise_presage = any(k in data for k in [
+        "base_bonus_si_presage", "status_si_presage", "execute_percent_si_presage",
+        "ignore_rob_si_presage", "no_regen_si_presage"
+    ])
+    if presage_exact and sort_utilise_presage:
+        # Consommer le flag dès qu'un sort Oracle l'exploite
+        attaquant.effets.pop("_presage_exact", None)
+        msg.append("🔮 **Prédiction exacte consommée !**")
     if presage_exact:
         if "base_bonus_si_presage" in data:
             bp = data["base_bonus_si_presage"]
@@ -4797,7 +4807,7 @@ async def mj_presage(interaction: discord.Interaction, joueur: discord.Member, v
     # Poser le flag _presage_exact pour activer les bonus conditionnels des sorts Oracle
     if verdict.value == "exact":
         # duree:2 pour survivre au /tour du round courant et être actif au tour suivant
-        p.effets["_presage_exact"] = {"duree": 2, "valeur": 1}
+        p.effets["_presage_exact"] = {"duree": 999, "valeur": 1}
     else:
         p.effets.pop("_presage_exact", None)
     p.sauvegarder()
