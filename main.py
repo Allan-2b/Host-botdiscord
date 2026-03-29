@@ -1637,6 +1637,45 @@ async def joueur_perso_autocomplete(interaction: discord.Interaction, current: s
         for r in rows
     ][:25]
 
+async def cible_fiche_autocomplete(interaction: discord.Interaction, current: str):
+    """Autocomplete cible : liste TOUTES les fiches de tous les joueurs en session.
+    Retourne 'user_id:nom' pour permettre au MJ de cibler n'importe quelle fiche."""
+    conn = get_db_connection()
+    rows = conn.execute("""
+        SELECT DISTINCT j.user_id, j.nom, j.classe, j.niveau
+        FROM joueurs j
+        WHERE j.user_id IN (SELECT user_id FROM sessions)
+        AND (j.nom LIKE ? OR j.classe LIKE ?)
+        ORDER BY j.nom
+        LIMIT 25
+    """, (f"%{current}%", f"%{current}%")).fetchall()
+    conn.close()
+    return [
+        app_commands.Choice(
+            name=f"{r['nom']} (Niv {r['niveau']} {r['classe'].capitalize()})",
+            value=f"{r['user_id']}:{r['nom']}"
+        )
+        for r in rows
+    ][:25]
+
+def parse_cible_arg(arg: str):
+    """Parse un argument cible de la forme 'user_id:nom' ou 'user_id'.
+    Retourne (user_id: int, nom: str | None). Charge le Personnage correspondant."""
+    if arg and ':' in arg:
+        parts = arg.split(':', 1)
+        try:
+            uid = int(parts[0])
+            nom = parts[1]
+            return Personnage.charger_par_nom(uid, nom)
+        except (ValueError, IndexError):
+            return None
+    elif arg:
+        try:
+            return Personnage.charger(int(arg))
+        except ValueError:
+            return None
+    return None
+
 def resolve_sort_ref(sort: str) -> str:
     """Résout une ref de sort : accepte la ref directe OU le nom affiché (mobile).
     Retourne la ref normalisée si trouvée, sinon la valeur originale."""
@@ -3028,21 +3067,18 @@ async def tour(interaction: discord.Interaction,
 
 # 1. SOIN
 @bot.tree.command(name="soigner", description="🙏 Soigner une cible")
-@app_commands.describe(sort="Le sort de soin", cible="Le joueur à soigner", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_soin_autocomplete, personnage=joueur_perso_autocomplete)
-async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Member, personnage: str = None):
+@app_commands.describe(sort="Le sort de soin", cible="Le joueur à soigner (tapez pour chercher)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=sort_soin_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete)
+async def soigner(interaction: discord.Interaction, sort: str, cible: str, personnage: str = None):
     p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
     dispo, msg_err = verifier_cooldown(p, sort)
     if not dispo:
         return await interaction.response.send_message(msg_err, ephemeral=True)
     # Vérif État Soigneur
-    if is_stun_actif(p) or "gel" in p.effets: 
+    if is_stun_actif(p) or "gel" in p.effets:
         return await interaction.response.send_message("❌ Vous êtes hors d'état d'agir (Stun/Gel).", ephemeral=True)
-    if interaction.user.id == cible.id:
-        p_cible = p
-    else:
-        p_cible = Personnage.charger(cible.id)
+    p_cible = parse_cible_arg(cible) if cible else p
     if not p_cible: return await interaction.response.send_message("❌ Cible invalide.", ephemeral=True)
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.response.send_message("❌ Sort introuvable.", ephemeral=True)
@@ -3159,13 +3195,13 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: discord.Me
     embed.add_field(name="Résultat", value=f"{' '.join(visuel)}\n# 💚 +{total_soin} PV{msg_peste}{msg_lotus_soin}", inline=False)
     embed.add_field(name="État", value=f"{anciens_pv} ➔ **{p_cible.pv_actuel}** / {p_cible.pv_max} PV", inline=False)
     await log_combat(interaction, embed)
-    await interaction.response.send_message(content=f"{cible.mention}", embed=embed)
+    await interaction.response.send_message(content=f"<@{p_cible.user_id}>", embed=embed)
 
 # 2. CLASH
 @bot.tree.command(name="clash", description="un adversaire vous attaque et vous l'attaquez en retour")
-@app_commands.describe(sort="Votre technique", cible="L'adversaire", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete)
-async def clash(interaction: discord.Interaction, sort: str, cible: discord.Member, description: str, cibles_secondaires: str = None, personnage: str = None):
+@app_commands.describe(sort="Votre technique", cible="L'adversaire (tapez pour chercher)", description="Action RP", cibles_secondaires="Autres cibles de zone (tapez les noms)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete)
+async def clash(interaction: discord.Interaction, sort: str, cible: str, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
     p_attaquant = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p_attaquant: return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
@@ -3179,11 +3215,16 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
     if is_stun_actif(p_attaquant): return await interaction.followup.send("💫 **Étourdi !** Impossible de lancer un clash.", ephemeral=True)
     if "gel" in p_attaquant.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible de bouger.", ephemeral=True)
 
+    # Résolution de la cible depuis "user_id:nom"
+    p_cible_clash = parse_cible_arg(cible)
+    if not p_cible_clash: return await interaction.followup.send("❌ Cible introuvable.", ephemeral=True)
+    cible_user_id = p_cible_clash.user_id
+
     # Blocage auto-ciblage — sauf pour un GM qui joue deux fiches distinctes
-    if cible.id == interaction.user.id:
+    if cible_user_id == interaction.user.id:
         if not (is_gm(interaction.user.id) and personnage):
             return await interaction.followup.send("❌ Cible invalide.", ephemeral=True)
-    if cible.id in PENDING_CLASHES: return await interaction.followup.send(f"❌ Déjà défié.", ephemeral=True)
+    if cible_user_id in PENDING_CLASHES: return await interaction.followup.send(f"❌ Déjà défié.", ephemeral=True)
     
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
@@ -3269,36 +3310,44 @@ async def clash(interaction: discord.Interaction, sort: str, cible: discord.Memb
     if _flag_ma_clash:
         skill_obj.coins += _flag_ma_clash.get("valeur", 1)
 
-    PENDING_CLASHES[cible.id] = {
+    PENDING_CLASHES[cible_user_id] = {
         'attaquant_id': interaction.user.id,
         'skill_a': skill_obj,
         'desc_a': description,
         'p_attaquant': p_attaquant,
-        'cibles_sec_a': cibles_secondaires, 
+        'cibles_sec_a': cibles_secondaires,
         'ref_a': sort,
-        'sort_data_a': skill_data  # Store pour appliquer festin/résonance dans riposte
+        'sort_data_a': skill_data
     }
 
-    embed = discord.Embed(title="⚔️ CLASH INITIÉ !", description=f"**{p_attaquant.nom}** provoque **{cible.display_name}** !", color=0xE67E22)
+    embed = discord.Embed(title="⚔️ CLASH INITIÉ !", description=f"**{p_attaquant.nom}** provoque **{p_cible_clash.nom}** !", color=0xE67E22)
     embed.add_field(name="Technique", value=f"⚡ **{skill_obj.nom}**\n*{skill_data['desc']}*{cout_msg}{msg_hemo}", inline=False)
     embed.add_field(name="Action", value=f"*« {description} »*", inline=False)
-    embed.add_field(name="En attente...", value=f"👉 **{cible.mention}**, répondez avec `/riposte` !", inline=False)
-    
-    # Correction ICI : followup au lieu de response.send_message
+    embed.add_field(name="En attente...", value=f"👉 **{p_cible_clash.nom}** (<@{cible_user_id}>), répondez avec `/riposte` !", inline=False)
+
     await log_combat(interaction, embed)
-    await interaction.followup.send(content=f"{cible.mention}", embed=embed)
+    await interaction.followup.send(content=f"<@{cible_user_id}>", embed=embed)
 
 # 3. RIPOSTE (Modifié avec Races & Calculs Dégâts)
 @bot.tree.command(name="riposte", description="Répondre à la commande /clash d'un adversaire")
-@app_commands.describe(sort="Votre technique", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.describe(sort="Votre technique", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet (noms des cibles)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
 @app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete)
 async def riposte(interaction: discord.Interaction, sort: str, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
     user_id = interaction.user.id
-    if user_id not in PENDING_CLASHES: return await interaction.followup.send("❌ Personne ne vous a défié.", ephemeral=True)
-    
-    clash_data = PENDING_CLASHES.pop(user_id)
+
+    # Charger la fiche défenseur selon le paramètre personnage
     p_defenseur: Personnage = Personnage.charger_par_nom(user_id, personnage) if personnage else Personnage.charger(user_id)
+    if not p_defenseur:
+        return await interaction.followup.send("❌ Fiche introuvable.", ephemeral=True)
+
+    # Chercher le clash en attente : d'abord par user_id direct, puis par user_id:nom_fiche
+    clash_data = None
+    if user_id in PENDING_CLASHES:
+        clash_data = PENDING_CLASHES.pop(user_id)
+    else:
+        return await interaction.followup.send("❌ Personne ne vous a défié.", ephemeral=True)
+
     p_attaquant: Personnage = clash_data['p_attaquant']
     skill_a_org: Skill = clash_data['skill_a']
 
@@ -3699,16 +3748,13 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         
 # 4. ATTAQUE 
 @bot.tree.command(name="attaque", description="Attaque")
-@app_commands.describe(sort="Votre technique", cible="L'adversaire", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet, pinguez les autres (@)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete)
-async def attaque(interaction: discord.Interaction, sort: str, cible: discord.Member, description: str, cibles_secondaires: str = None, personnage: str = None):
+@app_commands.describe(sort="Votre technique", cible="L'adversaire (tapez pour chercher)", description="Action RP", cibles_secondaires="Autres cibles de zone (noms)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete)
+async def attaque(interaction: discord.Interaction, sort: str, cible: str, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
     p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
-    if interaction.user.id == cible.id:
-        p_cible = p 
-    else:
-        p_cible = Personnage.charger(cible.id)
-    
+    p_cible = parse_cible_arg(cible)
+
     if not p: return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
     if not p_cible: return await interaction.followup.send("❌ La cible n'a pas de fiche.", ephemeral=True)
     if p.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
