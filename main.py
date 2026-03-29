@@ -1658,6 +1658,40 @@ async def cible_fiche_autocomplete(interaction: discord.Interaction, current: st
         for r in rows
     ][:25]
 
+def parse_cibles_sec(cibles_str: str):
+    """Parse les cibles secondaires : 'user_id:nom' séparés par espaces/virgules.
+    Supporte aussi les @mentions Discord. Retourne une liste de Personnage."""
+    import re
+    tokens = [t.strip() for t in cibles_str.replace(",", " ").split() if t.strip()]
+    result = []
+    for token in tokens:
+        p_sec = None
+        if ":" in token:
+            p_sec = parse_cible_arg(token)
+        else:
+            m = re.match(r"<@!?(\d+)>", token)
+            if m:
+                p_sec = Personnage.charger(int(m.group(1)))
+        if p_sec:
+            result.append(p_sec)
+    return result
+
+def appliquer_statuts_aoe(persos_sec, data_sort):
+    """Applique les statuts du sort immédiatement sur les fiches secondaires.
+    Les dégâts restent à défendre via /defense. Retourne lignes de msg."""
+    icones_s = {"poison":"☠️","brulure":"🔥","gel":"❄️","stun":"💫",
+                "root":"🌳","hemorragie":"🩸","mutilation":"🦴"}
+    lignes = []
+    for p_sec in persos_sec:
+        appliques = []
+        for effet, valeur in data_sort.get("status", {}).items():
+            p_sec.ajouter_effet(effet, valeur)
+            appliques.append(f"{icones_s.get(effet,'✨')} {effet.capitalize()} ({valeur})")
+        p_sec.sauvegarder()
+        if appliques:
+            lignes.append(f"**{p_sec.nom}** : {', '.join(appliques)}")
+    return lignes
+
 def parse_cible_arg(arg: str):
     """Parse un argument cible de la forme 'user_id:nom' ou 'user_id'.
     Retourne (user_id: int, nom: str | None). Charge le Personnage correspondant."""
@@ -3200,7 +3234,7 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: str, perso
 # 2. CLASH
 @bot.tree.command(name="clash", description="un adversaire vous attaque et vous l'attaquez en retour")
 @app_commands.describe(sort="Votre technique", cible="L'adversaire (tapez pour chercher)", description="Action RP", cibles_secondaires="Autres cibles de zone (tapez les noms)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete)
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete, cibles_secondaires=cible_fiche_autocomplete)
 async def clash(interaction: discord.Interaction, sort: str, cible: str, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
     p_attaquant = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
@@ -3331,7 +3365,7 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
 # 3. RIPOSTE (Modifié avec Races & Calculs Dégâts)
 @bot.tree.command(name="riposte", description="Répondre à la commande /clash d'un adversaire")
 @app_commands.describe(sort="Votre technique", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet (noms des cibles)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete)
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cibles_secondaires=cible_fiche_autocomplete)
 async def riposte(interaction: discord.Interaction, sort: str, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
     user_id = interaction.user.id
@@ -3711,7 +3745,16 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         )
         
         if cibles_sec_gagnant and (data_gagnant.get("aoe") or data_gagnant.get("ricochet")):
-            embed_fin.add_field(name="💥 ATTAQUE AOE/RICOCHET", value=f"{cibles_sec_gagnant},\n👉 **Utilisez `/defense` contre {damage_final} dégâts !**", inline=False)
+            persos_sec = parse_cibles_sec(cibles_sec_gagnant)
+            noms_sec = ", ".join(f"**{ps.nom}** (<@{ps.user_id}>)" for ps in persos_sec) if persos_sec else cibles_sec_gagnant
+            embed_fin.add_field(
+                name="💥 ATTAQUE AOE/RICOCHET",
+                value=f"{noms_sec} :\n👉 **`/defense` contre {damage_final} dégâts !**\n*(Les effets de statut sont appliqués immédiatement)*",
+                inline=False
+            )
+            lignes_aoe = appliquer_statuts_aoe(persos_sec, data_gagnant)
+            if lignes_aoe:
+                embed_fin.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_aoe), inline=False)
 
         embed_fin.add_field(name="Action", value=f"👉 **<@{perdant.user_id}>**, utilisez `/defense` !", inline=False)
         await log_combat(interaction, embed_fin)
@@ -3729,14 +3772,18 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
                 try: data_a = json.loads(SKILLS_DB[ref_a].get('data_json', '{}'))
                 except: data_a = {}
                 if data_a.get("aoe") or data_a.get("ricochet"):
-                    # Dégâts de base du sort (sans pièces — clash perdu)
                     skill_a_base = clash_data.get('skill_a')
                     dmg_zone = getattr(skill_a_base, 'base', 0) if skill_a_base else 0
+                    persos_sec_atq = parse_cibles_sec(cibles_sec_atq)
+                    noms_sec_atq = ", ".join(f"**{ps.nom}** (<@{ps.user_id}>)" for ps in persos_sec_atq) if persos_sec_atq else cibles_sec_atq
                     embed_fin.add_field(
                         name="💥 ZONE ATTAQUANT (clash perdu — dégâts de base)",
-                        value=f"{cibles_sec_atq},\n👉 **Utilisez `/defense` contre {dmg_zone} dégâts** (dégâts de base, clash perdu) !",
+                        value=f"{noms_sec_atq} :\n👉 **`/defense` contre {dmg_zone} dégâts** (dégâts de base, clash perdu)\n*(Les effets de statut sont appliqués immédiatement)*",
                         inline=False
                     )
+                    lignes_aoe_atq = appliquer_statuts_aoe(persos_sec_atq, data_a)
+                    if lignes_aoe_atq:
+                        embed_fin.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_aoe_atq), inline=False)
 
         embed_fin.add_field(name="Action", value=f"👉 **<@{perdant.user_id}>**, utilisez `/defense` !", inline=False)
         
@@ -3749,7 +3796,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
 # 4. ATTAQUE 
 @bot.tree.command(name="attaque", description="Attaque")
 @app_commands.describe(sort="Votre technique", cible="L'adversaire (tapez pour chercher)", description="Action RP", cibles_secondaires="Autres cibles de zone (noms)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete)
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete, cibles_secondaires=cible_fiche_autocomplete)
 async def attaque(interaction: discord.Interaction, sort: str, cible: str, description: str, cibles_secondaires: str = None, personnage: str = None):
     await interaction.response.defer()
     p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
@@ -4109,12 +4156,24 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         embed.add_field(name="🗡️ Rob Percée", value=f"👉 **{p_cible.nom}** : `/defense` avec **perce_armure: Vrai** ! (Robustesse ignorée)", inline=False)
 
     data_parse = json.loads(json_data)
+
     if cibles_secondaires and (data_parse.get("aoe") or data_parse.get("ricochet")):
-        embed.add_field(name="💥 Cibles Collatérales", value=f"{cibles_secondaires}, vous êtes dans la zone !\n👉 **Utilisez `/defense` contre {total} dégâts !**", inline=False)
+        persos_sec = parse_cibles_sec(cibles_secondaires)
+        noms_sec = ", ".join(f"**{ps.nom}** (<@{ps.user_id}>)" for ps in persos_sec) if persos_sec else cibles_secondaires
+        embed.add_field(name="💥 Cibles Collatérales", value=f"{noms_sec} : dans la zone !\n👉 **`/defense` contre {total} dégâts !**", inline=False)
+        lignes_effets = appliquer_statuts_aoe(persos_sec, data_parse)
+        if lignes_effets:
+            embed.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_effets), inline=False)
+
     if cibles_secondaires and data_parse.get("aoe_reduit"):
         total_reduit = max(1, total // 2)
-        embed.add_field(name="💥 Cible Secondaire (demi-dégâts)", value=f"{cibles_secondaires} !\n👉 **`/defense` contre {total_reduit} dégâts** (frappe réduite de moitié) !", inline=False)
-    
+        persos_sec = parse_cibles_sec(cibles_secondaires)
+        noms_sec = ", ".join(f"**{ps.nom}** (<@{ps.user_id}>)" for ps in persos_sec) if persos_sec else cibles_secondaires
+        embed.add_field(name="💥 Cible Secondaire (demi-dégâts)", value=f"{noms_sec} !\n👉 **`/defense` contre {total_reduit} dégâts** (frappe réduite de moitié) !", inline=False)
+        lignes_effets = appliquer_statuts_aoe(persos_sec, data_parse)
+        if lignes_effets:
+            embed.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_effets), inline=False)
+
     await log_combat(interaction, embed)
     await interaction.followup.send(embed=embed)
 
