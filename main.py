@@ -3233,10 +3233,17 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: str, perso
 
 # 2. CLASH
 @bot.tree.command(name="clash", description="un adversaire vous attaque et vous l'attaquez en retour")
-@app_commands.describe(sort="Votre technique", cible="L'adversaire (tapez pour chercher)", description="Action RP", cibles_secondaires="Autres cibles de zone (tapez les noms)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete, cibles_secondaires=cible_fiche_autocomplete)
-async def clash(interaction: discord.Interaction, sort: str, cible: str, description: str, cibles_secondaires: str = None, personnage: str = None):
+@app_commands.describe(
+    sort="Votre technique", cible="L'adversaire (tapez pour chercher)",
+    description="Action RP", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)",
+    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)"
+)
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete,
+    cible_sec1=cible_fiche_autocomplete, cible_sec2=cible_fiche_autocomplete, cible_sec3=cible_fiche_autocomplete)
+async def clash(interaction: discord.Interaction, sort: str, cible: str, description: str, personnage: str = None,
+                cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None):
     await interaction.response.defer()
+    cibles_secondaires = " ".join(s for s in [cible_sec1, cible_sec2, cible_sec3] if s) or None
     p_attaquant = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p_attaquant: return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
     if p_attaquant.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
@@ -3364,9 +3371,15 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
 
 # 3. RIPOSTE (Modifié avec Races & Calculs Dégâts)
 @bot.tree.command(name="riposte", description="Répondre à la commande /clash d'un adversaire")
-@app_commands.describe(sort="Votre technique", description="Action RP", cibles_secondaires="Si c'est une attaque de Zone/Ricochet (noms des cibles)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cibles_secondaires=cible_fiche_autocomplete)
-async def riposte(interaction: discord.Interaction, sort: str, description: str, cibles_secondaires: str = None, personnage: str = None):
+@app_commands.describe(
+    sort="Votre technique", description="Action RP", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)",
+    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)"
+)
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete,
+    cible_sec1=cible_fiche_autocomplete, cible_sec2=cible_fiche_autocomplete, cible_sec3=cible_fiche_autocomplete)
+async def riposte(interaction: discord.Interaction, sort: str, description: str, personnage: str = None,
+                  cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None):
+    cibles_secondaires = " ".join(s for s in [cible_sec1, cible_sec2, cible_sec3] if s) or None
     await interaction.response.defer()
     user_id = interaction.user.id
 
@@ -3795,10 +3808,17 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         
 # 4. ATTAQUE 
 @bot.tree.command(name="attaque", description="Attaque")
-@app_commands.describe(sort="Votre technique", cible="L'adversaire (tapez pour chercher)", description="Action RP", cibles_secondaires="Autres cibles de zone (noms)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete, cibles_secondaires=cible_fiche_autocomplete)
-async def attaque(interaction: discord.Interaction, sort: str, cible: str, description: str, cibles_secondaires: str = None, personnage: str = None):
+@app_commands.describe(
+    sort="Votre technique", cible="L'adversaire (tapez pour chercher)",
+    description="Action RP", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)",
+    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)"
+)
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete,
+    cible_sec1=cible_fiche_autocomplete, cible_sec2=cible_fiche_autocomplete, cible_sec3=cible_fiche_autocomplete)
+async def attaque(interaction: discord.Interaction, sort: str, cible: str, description: str, personnage: str = None,
+                  cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None):
     await interaction.response.defer()
+    cibles_secondaires = " ".join(s for s in [cible_sec1, cible_sec2, cible_sec3] if s) or None
     p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     p_cible = parse_cible_arg(cible)
 
