@@ -548,7 +548,7 @@ def populate_spells():
         # PALLIER 1 (Coût: 1)
         ("heilung_novice", "Heilung Novice", '["pretre"]', 1, 1, 4, 3, 2, "foi", 15, "ferveur", 0, 1, "Soin divin léger qui referme les blessures.", "soin", "tronc", "{}"),
         ("bann_novice", "Bann Novice", '["pretre"]', 1, 1, 3, 2, 2, "foi", 12, "ferveur", 0, 1, "Fige partiellement la cible.", "actif", "tronc", '{"seuil": 1, "status": {"stun": 1}}'),
-        ("schild_novice", "Schild Novice (Bonus)", '["pretre"]', 1, 1, 2, 2, 3, "foi", 15, "ferveur", 0, 1, "Barrière divine protectrice.", "defense", "tronc", '{"seuil": 1, "reduce_dmg_dynamic": true}'),
+        ("schild_novice_pretre", "Schild Novice (Bonus)", '["pretre"]', 1, 1, 2, 2, 3, "foi", 15, "ferveur", 0, 1, "Barrière divine protectrice.", "defense", "tronc", '{"seuil": 1, "reduce_dmg_dynamic": true}'),
         ("urteil", "Urteil", '["pretre"]', 1, 1, 5, 2, 3, "foi", 10, "ferveur", 0, 0, "Un marteau de lumière tombe sur la cible.", "actif", "tronc", "{}"),
         ("heiliger_speer", "Heiliger Speer", '["pretre"]', 1, 1, 8, 3, 3, "foi", 15, "ferveur", 1, 2, "Lance de lumière perforante (Coûte 1 Verset).", "actif", "tronc", '{"ignore_armor": true}'),
         ("wahrheit", "Wahrheit (Bonus)", '["pretre"]', 1, 1, 0, 2, 0, "foi", 5, "ferveur", 0, 1, "Détecte les mensonges.", "utilitaire", "tronc", '{"seuil": 1, "rp_effect": "Avantage narratif pour discerner la vérité."}'),
@@ -567,7 +567,7 @@ def populate_spells():
         # PALLIER 3 (Coût: 3)
         ("heilung_normal", "Heilung", '["pretre"]', 3, 3, 9, 4, 3, "foi", 25, "ferveur", 0, 1, "Soin purificateur plus puissant.", "soin", "tronc", '{"seuil": 1, "cleanse_target": true}'),
         ("bann_normal", "Bann", '["pretre"]', 3, 3, 7, 3, 3, "foi", 20, "ferveur", 0, 1, "Chaines sacrées brûlantes.", "actif", "tronc", '{"seuil": 1, "status": {"stun": 1, "brulure": 1}}'),
-        ("schild_normal", "Schild (Bonus)", '["pretre"]', 3, 3, 5, 3, 4, "foi", 25, "ferveur", 0, 1, "Barrière de groupe protectrice.", "defense", "tronc", '{"seuil": 2, "reduce_dmg_dynamic": true}'),
+        ("schild_normal_pretre", "Schild (Bonus)", '["pretre"]', 3, 3, 5, 3, 4, "foi", 25, "ferveur", 0, 1, "Barrière de groupe protectrice.", "defense", "tronc", '{"seuil": 2, "reduce_dmg_dynamic": true}'),
         ("klingen", "Klingen", '["pretre"]', 3, 3, 11, 5, 2, "foi", 25, "ferveur", 0, 1, "Projectiles de lumière traqueurs.", "actif", "tronc", '{"seuil": 2, "ricochet": true}'),
         ("himmelsfeuer", "Himmelsfeuer", '["pretre"]', 3, 3, 20, 5, 4, "foi", 35, "ferveur", 6, 2, "Tempête de flammes sacrées (Coûte 6 Versets).", "actif", "tronc", '{"seuil": 3, "aoe": true, "status": {"brulure": 3}}'),
         ("exorzismus", "Exorzismus (Bonus)", '["pretre"]', 3, 3, 0, 2, 0, "foi", 15, "ferveur", 0, 1, "Contrôle mental divin.", "utilitaire", "tronc", '{"seuil": 1, "rp_effect": "Vous envoûtez l esprit d une personne pour un ordre non létal."}'),
