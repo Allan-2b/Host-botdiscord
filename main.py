@@ -371,16 +371,17 @@ def get_serment_bonus(p: 'Personnage') -> int:
 
 def calculer_serment(p: 'Personnage', degats_subis: int):
     """Accumule le bonus Serment : +1 par tranche de 10 PV reçus (min +1).
-    Le bonus STACKS indéfiniment jusqu'au max. Rien ne le consomme."""
+    Sous 30% PV le plafond monte à 12 (ou 15 avec Corps de Fer) mais s'accumule normalement.
+    Rien ne consomme le bonus."""
     if not p.serment_actif: return
     seuil_30 = p.pv_max * 0.3
-    max_bonus = 10 if "passif_nord_fer" in p.competences else 8
-    max_bas = 15 if "passif_nord_fer" in p.competences else 12
+    # Le plafond dépend des PV actuels
     if p.pv_actuel <= seuil_30:
-        p.serment_bonus = max_bas
+        max_actuel = 15 if "passif_nord_fer" in p.competences else 12
     else:
-        gain = max(1, degats_subis // 10)
-        p.serment_bonus = min(max_bonus, p.serment_bonus + gain)
+        max_actuel = 10 if "passif_nord_fer" in p.competences else 8
+    gain = max(1, degats_subis // 10)
+    p.serment_bonus = min(max_actuel, p.serment_bonus + gain)
 
 def appliquer_fureur_tribale(p: 'Personnage', pv_avant: int, degats: int) -> str:
     """Vérifie et applique la Fureur Tribale (passage sous 50% PV). Retourne message."""
