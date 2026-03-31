@@ -2904,8 +2904,10 @@ async def tour(interaction: discord.Interaction,
 
                 elif code in ["stun", "gel"]:
                     if code == "stun" and data.get("nouveau"):
+                        # Premier tour : annonce seulement, NE PAS décrémenter
                         data.pop("nouveau")
                         rapport_effets.append(f"{ico} **Étourdi** : Bloqué au **prochain tour** !")
+                        continue  # skip la décrémentation de ce tour
                     else:
                         skip_turn = True
                         nom_etat = "Gelé" if code == "gel" else "Étourdi"
