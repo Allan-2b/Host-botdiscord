@@ -1,0 +1,582 @@
+╔══════════════════════════════════════════════════════════════════════════════════╗
+║              CATALOGUE DES ÉQUIPEMENTS — UNIVERS FRIEREN                       ║
+║              Système de monnaie : 🥇 Or | 🥈 Argent | 🥉 Bronze               ║
+║              1 Or = 10 Argent = 100 Bronze                                     ║
+╚══════════════════════════════════════════════════════════════════════════════════╝
+
+Les prix sont indiqués en valeur totale de bronze (utilisée en base de données).
+Exemple : 250 = 2 Or 5 Argent 0 Bronze.
+
+Slots disponibles : arme | armure | collier | anneau | cape | ceinture
+Chaque personnage peut porter : 1 arme, 1 armure, 2 anneaux, 1 collier, 1 cape, 1 ceinture.
+
+Les items avec (+) sont des améliorations du précédent et doivent remplacer l'original en boutique
+ou être achetés séparément (à la discrétion du MJ).
+
+════════════════════════════════════════════════════════════════════════════════════
+⚔️  VOIE DU GUERRIER
+════════════════════════════════════════════════════════════════════════════════════
+
+── ARMES ──────────────────────────────────────────────────────────────────────────
+
+  Lame de Voyage
+  Slot : arme | Prix : 80 bronze (0🥇 8🥈 0🥉)
+  Une épée courte robuste, équilibrée pour les débutants.
+  Effet : +2 Base sur toutes les attaques physiques.
+
+  Lame de Voyage Affinée (+)
+  Slot : arme | Prix : 200 bronze (2🥇 0🥈 0🥉)
+  La même lame, retravaillée par un forgeron expérimenté.
+  Effet : +3 Base sur toutes les attaques physiques. +1 Pièce.
+
+  Lame de Voyage Maîtresse (+)
+  Slot : arme | Prix : 450 bronze (4🥇 5🥈 0🥉)
+  Chef-d'œuvre de forge standard, tranchant comme un rasoir.
+  Effet : +4 Base. +1 Pièce. Ignore 1 Robustesse adverse.
+
+  ─────────────────────────────────────────────────────
+
+  Claymore de Guerre
+  Slot : arme | Prix : 150 bronze (1🥇 5🥈 0🥉)
+  Épée à deux mains lourde, dévastatrice mais lente.
+  Effet : +5 Base. −1 Pièce (encombrement).
+
+  Claymore de Guerre Renforcée (+)
+  Slot : arme | Prix : 350 bronze (3🥇 5🥈 0🥉)
+  Alliage de métal plus dense, rééquilibrée pour réduire l'encombrement.
+  Effet : +6 Base. Les attaques AOE gagnent +2 Base supplémentaires.
+
+  Claymore Légendaire (+)
+  Slot : arme | Prix : 700 bronze (7🥇 0🥈 0🥉)
+  On raconte qu'elle a appartenu à un héros tombé au combat.
+  Effet : +7 Base. AOE +3 Base. Génère +1 Tension supplémentaire par attaque.
+
+  ─────────────────────────────────────────────────────
+
+  Dague Rapide
+  Slot : arme | Prix : 60 bronze (0🥇 6🥈 0🥉)
+  Légère, conçue pour frapper vite et souvent.
+  Effet : +1 Base. +2 Pièces. Bonus Initiative +2.
+
+  Dague Rapide Trempée (+)
+  Slot : arme | Prix : 180 bronze (1🥇 8🥈 0🥉)
+  Trempée dans un acide spécial qui fragilise les chairs.
+  Effet : +2 Base. +2 Pièces. Initiative +2. Applique 1 Hémorragie si l'attaque touche.
+
+  Dague de l'Ombre (+)
+  Slot : arme | Prix : 400 bronze (4🥇 0🥈 0🥉)
+  Forgée pour les assassins, quasi invisible à la lumière.
+  Effet : +3 Base. +3 Pièces. Initiative +3. Hémorragie 2 si touche.
+
+── ARMURES ────────────────────────────────────────────────────────────────────────
+
+  Cotte de Mailles Légère
+  Slot : armure | Prix : 100 bronze (1🥇 0🥈 0🥉)
+  Protection standard, portée par la plupart des soldats.
+  Effet : +2 Robustesse.
+
+  Cotte de Mailles Renforcée (+)
+  Slot : armure | Prix : 250 bronze (2🥇 5🥈 0🥉)
+  Anneaux supplémentaires soudés aux zones vitales.
+  Effet : +4 Robustesse.
+
+  Armure de Plate Complète (+)
+  Slot : armure | Prix : 600 bronze (6🥇 0🥈 0🥉)
+  Armure intégrale en acier trempé, réservée aux guerriers aguerris.
+  Effet : +6 Robustesse. Réduit les dégâts AOE de 2.
+
+  ─────────────────────────────────────────────────────
+
+  Cuirasse du Combattant
+  Slot : armure | Prix : 120 bronze (1🥇 2🥈 0🥉)
+  Protège le torse tout en laissant les bras libres.
+  Effet : +3 Robustesse. +1 Pièce en Défense (encaisser).
+
+  Cuirasse du Vétéran (+)
+  Slot : armure | Prix : 300 bronze (3🥇 0🥈 0🥉)
+  Gravée de runes de protection par un forgeron spécialisé.
+  Effet : +4 Robustesse. +1 Pièce en Défense. Résiste aux Hémorragies (−1 valeur).
+
+  Cuirasse du Champion (+)
+  Slot : armure | Prix : 650 bronze (6🥇 5🥈 0🥉)
+  L'ultime protection pour ceux qui refusent de tomber.
+  Effet : +5 Robustesse. +2 Pièces en Défense. Résiste aux Hémorragies (−2 valeur).
+
+── ACCESSOIRES ────────────────────────────────────────────────────────────────────
+
+  Ceinture du Combattant
+  Slot : ceinture | Prix : 70 bronze (0🥇 7🥈 0🥉)
+  Cuir épais renforcé de plaques métalliques, protège les flancs.
+  Effet : +1 Robustesse. +3 PV Max.
+
+  Ceinture du Berserker (+)
+  Slot : ceinture | Prix : 200 bronze (2🥇 0🥈 0🥉)
+  Imbibée de l'énergie brutale de son ancien porteur.
+  Effet : +1 Robustesse. +5 PV Max. Génère +1 Tension au début du combat.
+
+  Cape du Soldat
+  Slot : cape | Prix : 50 bronze (0🥇 5🥈 0🥉)
+  Une cape militaire sobre, résistante aux intempéries.
+  Effet : +2 PV Max. Avantage narratif contre le froid.
+
+  Cape du Légionnaire (+)
+  Slot : cape | Prix : 160 bronze (1🥇 6🥈 0🥉)
+  Frappée des armoiries d'une légion célèbre, inspire la discipline.
+  Effet : +5 PV Max. Initiative +1. Avantage narratif Intimidation.
+
+  Collier des Batailles
+  Slot : collier | Prix : 80 bronze (0🥇 8🥈 0🥉)
+  Dents d'un monstre vaincu, symbole de force brute.
+  Effet : +2 PHY (narratif uniquement, ne modifie pas la stat en DB).
+  Note MJ : octroyer un bonus de +2 Base sur les sorts physiques à la place.
+
+  Collier du Conquérant (+)
+  Slot : collier | Prix : 220 bronze (2🥇 2🥈 0🥉)
+  Griffes d'un démon, sertie d'une pierre de sang séché.
+  Effet : +3 PHY (narratif). Bonus de +1 Pièce sur les attaques de zone.
+
+  Anneau du Survivant
+  Slot : anneau | Prix : 60 bronze (0🥇 6🥈 0🥉)
+  Un anneau simple en fer, forgé par un ancien combattant.
+  Effet : +5 PV Max.
+
+  Anneau du Survivant Serti (+)
+  Slot : anneau | Prix : 150 bronze (1🥇 5🥈 0🥉)
+  Le même anneau, rehaussé d'une gemme rouge sang.
+  Effet : +10 PV Max. Récupère 1 PV par tour si Hémorragie active.
+
+  Anneau de Tension
+  Slot : anneau | Prix : 90 bronze (0🥇 9🥈 0🥉)
+  Vibre légèrement au contact de l'adrénaline.
+  Effet : Commence le combat avec +1 Tension.
+
+  Anneau de Fureur (+)
+  Slot : anneau | Prix : 250 bronze (2🥇 5🥈 0🥉)
+  La pierre centrale rougeoie à chaque coup reçu.
+  Effet : Commence avec +2 Tension. Génère +1 Tension quand PV < 50%.
+
+
+════════════════════════════════════════════════════════════════════════════════════
+✨  VOIE DU MAGE
+════════════════════════════════════════════════════════════════════════════════════
+
+── ARMES (BÂTONS / CATALYSEURS) ───────────────────────────────────────────────────
+
+  Bâton du Novice
+  Slot : arme | Prix : 80 bronze (0🥇 8🥈 0🥉)
+  Un bâton en bois de cèdre, gravé de formules basiques.
+  Effet : +2 Base sur tous les sorts offensifs.
+
+  Bâton du Praticien (+)
+  Slot : arme | Prix : 200 bronze (2🥇 0🥈 0🥉)
+  Renforcé d'un cristal de mana brut en son sommet.
+  Effet : +3 Base. +3 Mana Max.
+
+  Bâton de l'Archimage (+)
+  Slot : arme | Prix : 480 bronze (4🥇 8🥈 0🥉)
+  Taillé dans le bois d'un arbre frappé par la foudre magique.
+  Effet : +4 Base. +5 Mana Max. Réduit le coût des sorts de 1 Mana (min 1).
+
+  ─────────────────────────────────────────────────────
+
+  Orbe de Focalisation
+  Slot : arme | Prix : 120 bronze (1🥇 2🥈 0🥉)
+  Sphère cristalline qui amplifie la précision des sorts.
+  Effet : +1 Base. +2 Pièces sur tous les sorts.
+
+  Orbe de Focalisation Parfaite (+)
+  Slot : arme | Prix : 320 bronze (3🥇 2🥈 0🥉)
+  Taillée dans du cristal de mana pur, elle n'admet aucune imprécision.
+  Effet : +2 Base. +3 Pièces. Les sorts à Ricochet gagnent +1 Pièce supplémentaire.
+
+  Orbe Singulière (+)
+  Slot : arme | Prix : 680 bronze (6🥇 8🥈 0🥉)
+  Un artefact unique, résonant avec le mana de son porteur.
+  Effet : +3 Base. +3 Pièces. Ricochet +2 Pièces. Sorts AOE ignorent 1 Robustesse.
+
+  ─────────────────────────────────────────────────────
+
+  Grimoire Enchanté
+  Slot : arme | Prix : 100 bronze (1🥇 0🥈 0🥉)
+  Un livre de sorts relié en cuir de démon, il chuchote des formules.
+  Effet : +2 Base. Réduit le coût en Mana de 1 (min 1) pour les sorts utilitaires.
+
+  Grimoire Ancien (+)
+  Slot : arme | Prix : 280 bronze (2🥇 8🥈 0🥉)
+  Les pages semblent s'écrire seules au fil des sorts lancés.
+  Effet : +3 Base. −1 Mana pour tous les sorts (min 1). +5 Mana Max.
+
+  Grimoire des Secrets (+)
+  Slot : arme | Prix : 600 bronze (6🥇 0🥈 0🥉)
+  Contient des sorts oubliés depuis des siècles. Dangereux à manipuler.
+  Effet : +4 Base. −2 Mana tous sorts (min 1). +8 Mana Max. +1 Pièce sorts Pallier 4-5.
+
+── ARMURES (ROBES / TUNIQUES) ──────────────────────────────────────────────────────
+
+  Robe du Voyageur
+  Slot : armure | Prix : 70 bronze (0🥇 7🥈 0🥉)
+  Légère et confortable, rien de spectaculaire.
+  Effet : +1 Robustesse. +5 Mana Max.
+
+  Robe de l'Érudit (+)
+  Slot : armure | Prix : 200 bronze (2🥇 0🥈 0🥉)
+  Tissée de fils conducteurs de mana, elle amplifie le flux magique.
+  Effet : +1 Robustesse. +10 Mana Max. +1 Base sorts pallier 1-2.
+
+  Robe de l'Archimage (+)
+  Slot : armure | Prix : 500 bronze (5🥇 0🥈 0🥉)
+  Portée uniquement par les mages ayant survécu à mille batailles.
+  Effet : +2 Robustesse. +15 Mana Max. +1 Base tous sorts. Immunité Poison.
+
+  ─────────────────────────────────────────────────────
+
+  Tunique de Concentration
+  Slot : armure | Prix : 90 bronze (0🥇 9🥈 0🥉)
+  Renforcée de plaques légères, sans entraver les gestes magiques.
+  Effet : +2 Robustesse. −1 Initiative (lourdeur légère).
+
+  Tunique du Sage (+)
+  Slot : armure | Prix : 240 bronze (2🥇 4🥈 0🥉)
+  Protège sans entraver, runes de Sagesse tissées dans le col.
+  Effet : +3 Robustesse. Initiative neutre (le malus disparaît).
+
+  Armure Runique (+)
+  Slot : armure | Prix : 550 bronze (5🥇 5🥈 0🥉)
+  Plaques légères gravées de runes de déviation.
+  Effet : +4 Robustesse. Annule le premier status négatif reçu par combat.
+
+── ACCESSOIRES ────────────────────────────────────────────────────────────────────
+
+  Collier de Cristal de Mana
+  Slot : collier | Prix : 100 bronze (1🥇 0🥈 0🥉)
+  Un cristal taillé en pendentif, il pulse doucement.
+  Effet : +8 Mana Max.
+
+  Collier du Flux Magique (+)
+  Slot : collier | Prix : 280 bronze (2🥇 8🥈 0🥉)
+  Le cristal s'embrase à chaque sort lancé.
+  Effet : +12 Mana Max. Récupère 2 Mana si un sort KO un ennemi.
+
+  Cape de Mana Pur
+  Slot : cape | Prix : 80 bronze (0🥇 8🥈 0🥉)
+  Tissée de fils de mana cristallisé, elle brille légèrement.
+  Effet : +5 Mana Max. +1 Base sorts de zone.
+
+  Cape du Grand Mage (+)
+  Slot : cape | Prix : 220 bronze (2🥇 2🥈 0🥉)
+  Portée par un mage de renom. Elle impose le respect.
+  Effet : +8 Mana Max. +2 Base sorts de zone. Avantage narratif Intimidation magique.
+
+  Ceinture de Focalisation
+  Slot : ceinture | Prix : 60 bronze (0🥇 6🥈 0🥉)
+  Maintient les cristaux auxiliaires pendant l'incantation.
+  Effet : +4 Mana Max. Sorts coûtant 0 gagnent +1 Base.
+
+  Ceinture de l'Archimage (+)
+  Slot : ceinture | Prix : 190 bronze (1🥇 9🥈 0🥉)
+  Ceinture de cuir de démon incrustée de cinq cristaux de mana.
+  Effet : +6 Mana Max. Sorts à 0 coût +2 Base. +1 Pièce sur sorts utilitaires.
+
+  Anneau d'Amplification
+  Slot : anneau | Prix : 70 bronze (0🥇 7🥈 0🥉)
+  Amplifie le mana émis à travers lui.
+  Effet : +1 Base sur tous les sorts.
+
+  Anneau d'Amplification Supérieur (+)
+  Slot : anneau | Prix : 200 bronze (2🥇 0🥈 0🥉)
+  Taillé dans un alliage rare qui ne laisse passer aucune perte de mana.
+  Effet : +2 Base. +1 Pièce sorts offensifs.
+
+  Anneau de Réserve
+  Slot : anneau | Prix : 90 bronze (0🥇 9🥈 0🥉)
+  Stocke un petit surplus de mana entre les combats.
+  Effet : +6 Mana Max.
+
+  Anneau de Grande Réserve (+)
+  Slot : anneau | Prix : 250 bronze (2🥇 5🥈 0🥉)
+  La pierre bleue pulsa de manière autonome même quand son porteur dort.
+  Effet : +10 Mana Max. Récupère 1 Mana au début de chaque tour.
+
+
+════════════════════════════════════════════════════════════════════════════════════
+🙏  VOIE DU PRÊTRE
+════════════════════════════════════════════════════════════════════════════════════
+
+── ARMES (SCEPTRES / RELIQUES) ────────────────────────────────────────────────────
+
+  Sceptre Sacré
+  Slot : arme | Prix : 80 bronze (0🥇 8🥈 0🥉)
+  Un sceptre en métal béni, simple mais efficace.
+  Effet : +2 Base sur tous les sorts de foi.
+
+  Sceptre Béni (+)
+  Slot : arme | Prix : 210 bronze (2🥇 1🥈 0🥉)
+  Consacré par un haut prêtre, il résonne avec la foi de son porteur.
+  Effet : +3 Base. +5 Ferveur de départ au combat.
+
+  Sceptre de la Grande Prêtresse (+)
+  Slot : arme | Prix : 500 bronze (5🥇 0🥈 0🥉)
+  On dit qu'il a guéri mille guerriers en une seule prière.
+  Effet : +4 Base. +10 Ferveur départ. Soins +2 PV supplémentaires.
+
+  ─────────────────────────────────────────────────────
+
+  Livre Saint
+  Slot : arme | Prix : 90 bronze (0🥇 9🥈 0🥉)
+  Un livre de prières, les formules inscrites amplifient les miracles.
+  Effet : +2 Base. −1 Verset pour les sorts coûtant des Versets (min 1).
+
+  Livre Saint Annoté (+)
+  Slot : arme | Prix : 250 bronze (2🥇 5🥈 0🥉)
+  Annoté de la main d'un saint, les marges regorgent de formules secrètes.
+  Effet : +3 Base. −1 Verset (min 1). +1 Pièce sorts de soin.
+
+  Livre des Miracles (+)
+  Slot : arme | Prix : 580 bronze (5🥇 8🥈 0🥉)
+  Un artefact divin. Chaque page tourne seule vers la prière nécessaire.
+  Effet : +4 Base. −2 Versets (min 1). +2 Pièces soins. Sorts de soin ignorent Robustesse.
+
+  ─────────────────────────────────────────────────────
+
+  Croix Reliquaire
+  Slot : arme | Prix : 100 bronze (1🥇 0🥈 0🥉)
+  Une relique supposément bénie par la Déesse elle-même.
+  Effet : +1 Base. +2 Pièces sorts divins. +1 Verset de départ au combat.
+
+  Croix Reliquaire Sacrée (+)
+  Slot : arme | Prix : 300 bronze (3🥇 0🥈 0🥉)
+  La relique pulse d'une lumière douce et rassurante en combat.
+  Effet : +2 Base. +2 Pièces sorts divins. +2 Versets départ. Ferveur max +10.
+
+  Croix de la Déesse (+)
+  Slot : arme | Prix : 700 bronze (7🥇 0🥈 0🥉)
+  Forgée dans l'or divin, elle réfléchit la lumière même dans l'obscurité totale.
+  Effet : +3 Base. +3 Pièces sorts divins. +3 Versets départ. Ferveur max +20.
+
+── ARMURES (ROBES SACRÉES / HAUBERTS) ─────────────────────────────────────────────
+
+  Robe de l'Acolyte
+  Slot : armure | Prix : 70 bronze (0🥇 7🥈 0🥉)
+  Robe blanche sobre, portée par les novices du temple.
+  Effet : +1 Robustesse. +5 Ferveur Max.
+
+  Robe du Prêtre (+)
+  Slot : armure | Prix : 200 bronze (2🥇 0🥈 0🥉)
+  Ornée de symboles sacrés dorés qui brillent en combat.
+  Effet : +2 Robustesse. +10 Ferveur Max. Récupère +2 Ferveur par tour (au lieu de la base).
+
+  Vêtements Divins (+)
+  Slot : armure | Prix : 520 bronze (5🥇 2🥈 0🥉)
+  Tissés d'un fil béni, ils semblent repousser les coups impurs.
+  Effet : +3 Robustesse. +15 Ferveur Max. +3 Ferveur/tour. Soins +1 PV.
+
+  ─────────────────────────────────────────────────────
+
+  Chasuble de Protection
+  Slot : armure | Prix : 110 bronze (1🥇 1🥈 0🥉)
+  Plaques légères bénies intégrées dans le tissu sacré.
+  Effet : +3 Robustesse. Réduit les dégâts reçus de 1 si Ferveur > 50.
+
+  Chasuble du Gardien (+)
+  Slot : armure | Prix : 300 bronze (3🥇 0🥈 0🥉)
+  Portée par les prêtres-guerriers, alliance du combat et de la foi.
+  Effet : +4 Robustesse. Réduit dégâts de 2 si Ferveur > 50. +5 PV Max.
+
+  Armure Sacrée (+)
+  Slot : armure | Prix : 620 bronze (6🥇 2🥈 0🥉)
+  L'armure des champions de la Déesse. Elle n'a jamais été percée.
+  Effet : +5 Robustesse. Réduit dégâts de 3 si Ferveur > 50. +10 PV Max.
+
+── ACCESSOIRES ────────────────────────────────────────────────────────────────────
+
+  Collier de Prière
+  Slot : collier | Prix : 80 bronze (0🥇 8🥈 0🥉)
+  Un chapelet de perles sacrées murmurant des prières.
+  Effet : +1 Verset de départ. +5 Ferveur Max.
+
+  Collier du Saint (+)
+  Slot : collier | Prix : 230 bronze (2🥇 3🥈 0🥉)
+  Contient une relique d'un saint guerisseur.
+  Effet : +2 Versets départ. +10 Ferveur Max. Soins minimum garantis à 3 PV.
+
+  Cape Bénite
+  Slot : cape | Prix : 70 bronze (0🥇 7🥈 0🥉)
+  Une cape aspergée d'eau bénite et consacrée au temple.
+  Effet : +5 Ferveur Max. Résistance Poison (−1 valeur).
+
+  Cape de la Lumière Éternelle (+)
+  Slot : cape | Prix : 200 bronze (2🥇 0🥈 0🥉)
+  Elle brille d'une lumière apaisante qui inspire confiance.
+  Effet : +10 Ferveur Max. Résistance Poison (−2). Avantage narratif Charisme divin.
+
+  Ceinture des Reliques
+  Slot : ceinture | Prix : 75 bronze (0🥇 7🥈 5🥉)
+  Ceinture de cuir portant de petites reliques de saints.
+  Effet : +5 Ferveur Max. +1 Ferveur récupérée par sort de soin lancé.
+
+  Ceinture du Grand Prêtre (+)
+  Slot : ceinture | Prix : 210 bronze (2🥇 1🥈 0🥉)
+  Ornée d'or et de gemmes sacrées, elle appartient aux élus.
+  Effet : +8 Ferveur Max. +2 Ferveur par soin lancé. +1 Verset si Ferveur > 80.
+
+  Anneau de Foi
+  Slot : anneau | Prix : 65 bronze (0🥇 6🥈 5🥉)
+  Un simple anneau d'argent béni par un prêtre.
+  Effet : +5 Ferveur Max.
+
+  Anneau de Foi Pure (+)
+  Slot : anneau | Prix : 180 bronze (1🥇 8🥈 0🥉)
+  La gemme dorée pulse en rythme avec les prières de son porteur.
+  Effet : +10 Ferveur Max. Sorts de soin +1 Base.
+
+  Anneau des Versets
+  Slot : anneau | Prix : 90 bronze (0🥇 9🥈 0🥉)
+  Gravé des 7 prières sacrées de la Déesse.
+  Effet : +1 Verset de départ par combat.
+
+  Anneau des Miracles (+)
+  Slot : anneau | Prix : 260 bronze (2🥇 6🥈 0🥉)
+  Il s'illumine quand son porteur accomplit un vrai miracle.
+  Effet : +2 Versets départ. Sorts coûtant des Versets : −1 Verset supplémentaire (min 1).
+
+
+════════════════════════════════════════════════════════════════════════════════════
+🌐  ÉQUIPEMENTS GÉNÉRAUX (Toutes voies)
+════════════════════════════════════════════════════════════════════════════════════
+
+Ces items conviennent à n'importe quel personnage, quelle que soit sa classe.
+
+── ARMURES GÉNÉRALES ──────────────────────────────────────────────────────────────
+
+  Armure de Cuir
+  Slot : armure | Prix : 50 bronze (0🥇 5🥈 0🥉)
+  Protection minimale pour les aventuriers débutants.
+  Effet : +1 Robustesse.
+
+  Armure de Cuir Cloutée (+)
+  Slot : armure | Prix : 140 bronze (1🥇 4🥈 0🥉)
+  Des clous métalliques absorbent une partie des chocs.
+  Effet : +2 Robustesse.
+
+  Armure de Cuir Draconique (+)
+  Slot : armure | Prix : 380 bronze (3🥇 8🥈 0🥉)
+  Tannée à partir de la peau d'un jeune dragon, extrêmement résistante.
+  Effet : +3 Robustesse. Immunité aux effets de Brûlure mineurs (≤ 2).
+
+── CAPES ──────────────────────────────────────────────────────────────────────────
+
+  Cape du Voyageur
+  Slot : cape | Prix : 40 bronze (0🥇 4🥈 0🥉)
+  Pratique, résistante aux intempéries, indispensable sur la route.
+  Effet : +3 PV Max. Avantage narratif Survie (météo).
+
+  Cape d'Invisibilité Partielle (+)
+  Slot : cape | Prix : 350 bronze (3🥇 5🥈 0🥉)
+  Une cape enchantée qui floute légèrement sa silhouette.
+  Effet : +3 PV Max. +1 Pièce sur les premières attaques de chaque combat (surprise).
+
+  Cape de l'Aventurier
+  Slot : cape | Prix : 80 bronze (0🥇 8🥈 0🥉)
+  Légère et confortable, parfaite pour les longues marches.
+  Effet : +5 PV Max. Avantage narratif Discrétion.
+
+  Cape du Chasseur (+)
+  Slot : cape | Prix : 200 bronze (2🥇 0🥈 0🥉)
+  Camouflage intégré, elle se confond avec l'environnement naturel.
+  Effet : +5 PV Max. Avantage narratif Discrétion + Survie. Initiative +1.
+
+── CEINTURES ───────────────────────────────────────────────────────────────────────
+
+  Ceinture de Vigueur
+  Slot : ceinture | Prix : 55 bronze (0🥇 5🥈 5🥉)
+  Renforcée de métal, elle soutient le corps lors des efforts intenses.
+  Effet : +5 PV Max.
+
+  Ceinture de Vigueur Supérieure (+)
+  Slot : ceinture | Prix : 160 bronze (1🥇 6🥈 0🥉)
+  Enchantée pour amplifier l'endurance naturelle.
+  Effet : +10 PV Max. Récupère 1 PV si fin de tour à pleine santé.
+
+  Ceinture de l'Explorateur
+  Slot : ceinture | Prix : 70 bronze (0🥇 7🥈 0🥉)
+  Nombreuses poches pour les consommables, lanières ajustables.
+  Effet : +3 PV Max. Avantage narratif sur les jets de Survie.
+
+── COLLIERS ───────────────────────────────────────────────────────────────────────
+
+  Amulette de Protection
+  Slot : collier | Prix : 60 bronze (0🥇 6🥈 0🥉)
+  Une simple amulette censée éloigner le mauvais sort.
+  Effet : +1 Robustesse. +3 PV Max.
+
+  Amulette de Protection Sacrée (+)
+  Slot : collier | Prix : 180 bronze (1🥇 8🥈 0🥉)
+  Consacrée en temple, elle a réellement absorbé un coup fatal une fois.
+  Effet : +2 Robustesse. +5 PV Max. 1× par combat : survit à 1 PV si KO (se réinitialise chaque combat).
+
+  Collier de l'Instinct
+  Slot : collier | Prix : 90 bronze (0🥇 9🥈 0🥉)
+  Vibre légèrement quand le danger est proche.
+  Effet : Initiative +2. Avantage narratif contre les embuscades.
+
+  Collier de l'Instinct Aiguisé (+)
+  Slot : collier | Prix : 250 bronze (2🥇 5🥈 0🥉)
+  La gemme centrale s'embrase d'un rouge vif à l'approche d'un ennemi puissant.
+  Effet : Initiative +3. Avantage narratif contre embuscades. +1 Pièce au premier tour.
+
+── ANNEAUX ────────────────────────────────────────────────────────────────────────
+
+  Anneau de Vie
+  Slot : anneau | Prix : 50 bronze (0🥇 5🥈 0🥉)
+  Un anneau vert pâle qui pulse doucement en harmonie avec le porteur.
+  Effet : +5 PV Max.
+
+  Anneau de Vie Amélioré (+)
+  Slot : anneau | Prix : 140 bronze (1🥇 4🥈 0🥉)
+  La pierre verte s'est assombrie, signe d'une magie plus profonde.
+  Effet : +10 PV Max.
+
+  Anneau de Résistance
+  Slot : anneau | Prix : 70 bronze (0🥇 7🥈 0🥉)
+  Forgé dans un alliage rare réputé pour absorber les afflictions.
+  Effet : +1 Robustesse. Résiste aux statuts négatifs (−1 tour de durée à l'application).
+
+  Anneau de Résistance Absolue (+)
+  Slot : anneau | Prix : 220 bronze (2🥇 2🥈 0🥉)
+  La surface est couverte de micro-runes de purification.
+  Effet : +2 Robustesse. Statuts négatifs −2 tours à l'application.
+
+  Anneau d'Initiative
+  Slot : anneau | Prix : 65 bronze (0🥇 6🥈 5🥉)
+  Un anneau léger qui accélère légèrement les réflexes.
+  Effet : Initiative +1.
+
+  Anneau des Réflexes (+)
+  Slot : anneau | Prix : 190 bronze (1🥇 9🥈 0🥉)
+  Forgé par un artisan spécialisé dans la magie de vitesse.
+  Effet : Initiative +2. +1 Pièce en Défense (Esquive uniquement).
+
+
+════════════════════════════════════════════════════════════════════════════════════
+📋  RÉSUMÉ DES PRIX PAR CATÉGORIE
+════════════════════════════════════════════════════════════════════════════════════
+
+  Tier 1 — Débutant    : 40–100 bronze   (accessibles dès le niveau 1)
+  Tier 2 — Intermédiaire : 140–280 bronze (recommandé niveaux 2–3)
+  Tier 3 — Avancé      : 320–520 bronze  (recommandé niveaux 4–5)
+  Tier 4 — Rare        : 550–700 bronze  (drops de boss ou quêtes spéciales)
+
+════════════════════════════════════════════════════════════════════════════════════
+📝  NOTES POUR LES MJs
+════════════════════════════════════════════════════════════════════════════════════
+
+• Pour ajouter un item en base : /gm_creer_item (ou équivalent) avec ref, nom, slot, description.
+• Les effets mécaniques (Robustesse, PV Max, Mana Max, Ferveur Max) doivent être appliqués
+  manuellement avec /set_stat après achat, ou gérés automatiquement si le système l'intègre.
+• Les effets narratifs (avantages Discrétion, Survie, etc.) sont à arbitrer en jeu par le MJ.
+• Les effets "1× par combat" ou "au début du combat" nécessitent un suivi manuel ou un effet
+  appliqué via /ajouter_effet au début de chaque scène de combat.
+• Les items avec (+) remplacent idéalement leur version précédente en boutique (upgrade).
+  Le MJ peut demander l'ancien item en échange pour un rabais, ou proposer l'upgrade payant.
+
+════════════════════════════════════════════════════════════════════════════════════

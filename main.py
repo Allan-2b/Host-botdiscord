@@ -151,6 +151,8 @@ def init_db():
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN last_action_type TEXT DEFAULT 'autre'")
     except sqlite3.OperationalError: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN fureur_tribale_used INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN mana_bonus_racial INTEGER DEFAULT 0")
     except sqlite3.OperationalError: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN concentre INTEGER DEFAULT 1")
     except sqlite3.OperationalError: pass
@@ -1147,6 +1149,7 @@ class Personnage:
         self.concentre = 1
         self.serment_actif = 0
         self.serment_bonus = 0
+        self.mana_bonus_racial = 0
         self.posture_active = 0
         self.designation_target_id = 0
         self.designation_stacks = 0
@@ -1190,7 +1193,7 @@ class Personnage:
             self.pv_max = 55 + ((self.niveau - 1) * 8)
         elif self.classe == "mage":
             self.pv_max = 35 + ((self.niveau - 1) * 4)
-            self.mana_max = (self.int_stat * 8) + 10 
+            self.mana_max = (self.int_stat * 8) + 10 + getattr(self, 'mana_bonus_racial', 0) 
         elif self.classe == "pretre":
             self.pv_max = 45 + ((self.niveau - 1) * 6)
             self.versets_max = self.sag 
@@ -1225,9 +1228,9 @@ class Personnage:
              festin, charges_elementaires,
              passe_active, parade_absorb, last_action_type, fureur_tribale_used,
              concentre, serment_actif, serment_bonus, posture_active,
-             designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges)
+             designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges, mana_bonus_racial)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
               self.tension, self.ferveur, self.versets, 
@@ -1242,7 +1245,7 @@ class Personnage:
               self.passe_active, self.parade_absorb, self.last_action_type, self.fureur_tribale_used,
               self.concentre, self.serment_actif, self.serment_bonus, self.posture_active,
               self.designation_target_id, self.designation_stacks, self.sentence_target_id, json.dumps(self.sentence_targets), self.passe_count,
-              json.dumps(self.badges)))
+              json.dumps(self.badges), getattr(self, 'mana_bonus_racial', 0)))
         
         conn.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (self.user_id, self.nom))
         conn.commit()
@@ -1291,6 +1294,7 @@ class Personnage:
         p.concentre = row['concentre'] if 'concentre' in row.keys() else 1
         p.serment_actif = row['serment_actif'] if 'serment_actif' in row.keys() else 0
         p.serment_bonus = row['serment_bonus'] if 'serment_bonus' in row.keys() else 0
+        p.mana_bonus_racial = row['mana_bonus_racial'] if 'mana_bonus_racial' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
         p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
@@ -1341,6 +1345,7 @@ class Personnage:
         p.concentre = row['concentre'] if 'concentre' in row.keys() else 1
         p.serment_actif = row['serment_actif'] if 'serment_actif' in row.keys() else 0
         p.serment_bonus = row['serment_bonus'] if 'serment_bonus' in row.keys() else 0
+        p.mana_bonus_racial = row['mana_bonus_racial'] if 'mana_bonus_racial' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
         p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
@@ -1408,7 +1413,7 @@ class Personnage:
         msg = f"🧬 **Évolution Raciale ({self.race}) au niveau {niv_affiche} !**"
         
         if self.race == "Elfe":
-            if self.classe == "mage": self.mana_max += 3
+            if self.classe == "mage": self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 3
             elif self.classe == "guerrier": pass 
             elif self.classe == "pretre": self.medecine += 1; self.religion += 1
 
@@ -1437,7 +1442,7 @@ class Personnage:
                 self.acrobatie += 1     
 
         elif self.race == "Céleste":
-            if self.classe == "mage": self.mana_max += 2
+            if self.classe == "mage": self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 2
             elif self.classe == "guerrier": pass 
             elif self.classe == "pretre": self.versets_max += 1; self.versets += 1
 
