@@ -3663,6 +3663,13 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
             damage_final, msg_v = traiter_effets_json(json_v, vainqueur, perdant, damage_final, heads=heads_final)
             if msg_v: bonus_txt += f"\n{msg_v}"
 
+            # Masse Initiale (Magie Gravitationnelle P1) : sorts TC → +1 Lestage si cible ≥ 3 Lestages
+            sort_data_v = SKILLS_DB[ref_vainqueur]
+            if "passif_grav_masse" in vainqueur.competences and sort_data_v.get("cat") == "tronc":
+                if get_lestage(perdant) >= 3:
+                    ajouter_lestage(perdant, 1, vainqueur)
+                    bonus_txt += "\n⚫ **Masse Initiale** : +1 Lestage bonus (cible portait ≥ 3 Lestages) !"
+
         # --- BONUS RACIAUX & EFFETS ---
         if vainqueur.race == "Drakéide":
             drake_bonus = vainqueur.niveau // 3
@@ -3974,6 +3981,12 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
 
     json_data = skill_data.get('data_json', '{}')
     total, msg_effets_spe = traiter_effets_json(json_data, p, p_cible, total, heads=heads)
+
+    # Masse Initiale (Magie Gravitationnelle P1) : sorts TC → +1 Lestage si cible ≥ 3 Lestages
+    if "passif_grav_masse" in p.competences and skill_data.get("cat") == "tronc":
+        if get_lestage(p_cible) >= 3:
+            ajouter_lestage(p_cible, 1, p)
+            msg_effets_spe = (msg_effets_spe or "") + "\n⚫ **Masse Initiale** : +1 Lestage bonus (cible portait ≥ 3 Lestages) !"
 
     # --- Passifs & Mécaniques ---
     if "gel" in p_cible.effets:
