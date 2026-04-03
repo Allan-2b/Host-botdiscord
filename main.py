@@ -153,6 +153,10 @@ def init_db():
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN fureur_tribale_used INTEGER DEFAULT 0")
     except: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN mana_bonus_racial INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN bonus_base_item INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN bonus_pieces_item INTEGER DEFAULT 0")
     except sqlite3.OperationalError: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN concentre INTEGER DEFAULT 1")
     except sqlite3.OperationalError: pass
@@ -1150,6 +1154,8 @@ class Personnage:
         self.serment_actif = 0
         self.serment_bonus = 0
         self.mana_bonus_racial = 0
+        self.bonus_base_item = 0
+        self.bonus_pieces_item = 0
         self.posture_active = 0
         self.designation_target_id = 0
         self.designation_stacks = 0
@@ -1228,9 +1234,10 @@ class Personnage:
              festin, charges_elementaires,
              passe_active, parade_absorb, last_action_type, fureur_tribale_used,
              concentre, serment_actif, serment_bonus, posture_active,
-             designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges, mana_bonus_racial)
+             designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges, mana_bonus_racial,
+             bonus_base_item, bonus_pieces_item)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
               self.tension, self.ferveur, self.versets, 
@@ -1245,7 +1252,8 @@ class Personnage:
               self.passe_active, self.parade_absorb, self.last_action_type, self.fureur_tribale_used,
               self.concentre, self.serment_actif, self.serment_bonus, self.posture_active,
               self.designation_target_id, self.designation_stacks, self.sentence_target_id, json.dumps(self.sentence_targets), self.passe_count,
-              json.dumps(self.badges), getattr(self, 'mana_bonus_racial', 0)))
+              json.dumps(self.badges), getattr(self, 'mana_bonus_racial', 0),
+              getattr(self, 'bonus_base_item', 0), getattr(self, 'bonus_pieces_item', 0)))
         
         conn.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (self.user_id, self.nom))
         conn.commit()
@@ -1295,6 +1303,8 @@ class Personnage:
         p.serment_actif = row['serment_actif'] if 'serment_actif' in row.keys() else 0
         p.serment_bonus = row['serment_bonus'] if 'serment_bonus' in row.keys() else 0
         p.mana_bonus_racial = row['mana_bonus_racial'] if 'mana_bonus_racial' in row.keys() else 0
+        p.bonus_base_item = row['bonus_base_item'] if 'bonus_base_item' in row.keys() else 0
+        p.bonus_pieces_item = row['bonus_pieces_item'] if 'bonus_pieces_item' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
         p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
@@ -1346,6 +1356,8 @@ class Personnage:
         p.serment_actif = row['serment_actif'] if 'serment_actif' in row.keys() else 0
         p.serment_bonus = row['serment_bonus'] if 'serment_bonus' in row.keys() else 0
         p.mana_bonus_racial = row['mana_bonus_racial'] if 'mana_bonus_racial' in row.keys() else 0
+        p.bonus_base_item = row['bonus_base_item'] if 'bonus_base_item' in row.keys() else 0
+        p.bonus_pieces_item = row['bonus_pieces_item'] if 'bonus_pieces_item' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
         p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
@@ -2639,7 +2651,7 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     elif p.classe == "mage": stat_valeur = p.esp; stat_nom = "ESP"
     elif p.classe == "pretre": stat_valeur = p.foi; stat_nom = "FOI"
 
-    skill_obj = Skill(skill_data["nom"], skill_data["base"], skill_data["bonus"], skill_data["coins"], stat_bonus=stat_valeur, stat_nom=stat_nom)
+    skill_obj = Skill(skill_data["nom"], skill_data["base"] + getattr(p, 'bonus_base_item', 0), skill_data["bonus"], skill_data["coins"] + getattr(p, 'bonus_pieces_item', 0), stat_bonus=stat_valeur, stat_nom=stat_nom)
 
     if "hate" in p.effets:
         skill_obj.coins += 2
@@ -3353,7 +3365,7 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
         elif p_attaquant.classe == "pretre": stat_valeur = p_attaquant.foi; stat_nom = "FOI"
         else: stat_nom = skill_data["stat_type"].upper(); stat_valeur = getattr(p_attaquant, skill_data["stat_type"], 0)
 
-    skill_obj = Skill(skill_data["nom"], skill_data["base"], skill_data["bonus"], skill_data["coins"], stat_bonus=stat_valeur, stat_nom=stat_nom)
+    skill_obj = Skill(skill_data["nom"], skill_data["base"] + getattr(p_attaquant, 'bonus_base_item', 0), skill_data["bonus"], skill_data["coins"] + getattr(p_attaquant, 'bonus_pieces_item', 0), stat_bonus=stat_valeur, stat_nom=stat_nom)
 
     if "hate" in p_attaquant.effets:
         skill_obj.coins += 2
@@ -3485,7 +3497,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         elif p_defenseur.classe == "pretre": stat_b = p_defenseur.foi; nom_stat_b = "FOI"
         else: nom_stat_b = skill_data_b["stat_type"].upper(); stat_b = getattr(p_defenseur, skill_data_b["stat_type"], 0)
 
-    skill_b_org = Skill(skill_data_b["nom"], skill_data_b["base"], skill_data_b["bonus"], skill_data_b["coins"], stat_bonus=stat_b, stat_nom=nom_stat_b)
+    skill_b_org = Skill(skill_data_b["nom"], skill_data_b["base"] + getattr(p_defenseur, 'bonus_base_item', 0), skill_data_b["bonus"], skill_data_b["coins"] + getattr(p_defenseur, 'bonus_pieces_item', 0), stat_bonus=stat_b, stat_nom=nom_stat_b)
 
     # --- ORACLE : malus_base (Touche du Destin) — réduit la Base de ce sort ---
     _malus_b_rip = p_defenseur.effets.pop("malus_base", None)
@@ -5047,6 +5059,8 @@ async def pigeon(interaction: discord.Interaction, joueur: discord.Member, messa
     app_commands.Choice(name="🤸 Acrobatie", value="acrobatie"),
     app_commands.Choice(name="💪 Force RP", value="force_rp"),
     app_commands.Choice(name="🏕️ Survie", value="survie"),
+    app_commands.Choice(name="⚔️ Bonus Base (items)", value="bonus_base_item"),
+    app_commands.Choice(name="🎲 Bonus Pièces (items)", value="bonus_pieces_item"),
 ])
 async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[str], valeur: int):
     # 1. Chargement
@@ -5319,7 +5333,16 @@ async def fiche(interaction: discord.Interaction):
         for item in p.equipement:
             ico = icones.get(item['slot'], "🔸")
             items_txt.append(f"{ico} **{item['nom']}**")
-        embed.add_field(name="Équipements", value=" | ".join(items_txt), inline=False)
+        # Bonus items actifs
+        bonus_txt = []
+        if getattr(p, 'bonus_base_item', 0) > 0:
+            bonus_txt.append(f"⚔️ +{p.bonus_base_item} Base (item)")
+        if getattr(p, 'bonus_pieces_item', 0) > 0:
+            bonus_txt.append(f"🎲 +{p.bonus_pieces_item} Pièces (item)")
+        equip_display = " | ".join(items_txt)
+        if bonus_txt:
+            equip_display += "\n" + " | ".join(bonus_txt)
+        embed.add_field(name="Équipements", value=equip_display, inline=False)
 
     or_p = p.monnaie // 100
     argent_p = (p.monnaie % 100) // 10
