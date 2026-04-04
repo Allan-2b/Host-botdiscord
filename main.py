@@ -157,6 +157,10 @@ def init_db():
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN bonus_base_item INTEGER DEFAULT 0")
     except: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN bonus_pieces_item INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN mana_max_bonus_item INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN pv_max_bonus_item INTEGER DEFAULT 0")
     except sqlite3.OperationalError: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN concentre INTEGER DEFAULT 1")
     except sqlite3.OperationalError: pass
@@ -1156,6 +1160,8 @@ class Personnage:
         self.mana_bonus_racial = 0
         self.bonus_base_item = 0
         self.bonus_pieces_item = 0
+        self.mana_max_bonus_item = 0
+        self.pv_max_bonus_item = 0
         self.posture_active = 0
         self.designation_target_id = 0
         self.designation_stacks = 0
@@ -1196,12 +1202,12 @@ class Personnage:
         self.mana_max = 0
         self.versets_max = 0
         if self.classe == "guerrier":
-            self.pv_max = 55 + ((self.niveau - 1) * 8)
+            self.pv_max = 55 + ((self.niveau - 1) * 8) + getattr(self, 'pv_max_bonus_item', 0)
         elif self.classe == "mage":
-            self.pv_max = 35 + ((self.niveau - 1) * 4)
-            self.mana_max = (self.int_stat * 8) + 10 + getattr(self, 'mana_bonus_racial', 0) 
+            self.pv_max = 35 + ((self.niveau - 1) * 4) + getattr(self, 'pv_max_bonus_item', 0)
+            self.mana_max = (self.int_stat * 8) + 10 + getattr(self, 'mana_bonus_racial', 0) + getattr(self, 'mana_max_bonus_item', 0) 
         elif self.classe == "pretre":
-            self.pv_max = 45 + ((self.niveau - 1) * 6)
+            self.pv_max = 45 + ((self.niveau - 1) * 6) + getattr(self, 'pv_max_bonus_item', 0)
             self.versets_max = self.sag 
         if self.race == "Féral":
             self.pv_max -= 5
@@ -1235,9 +1241,9 @@ class Personnage:
              passe_active, parade_absorb, last_action_type, fureur_tribale_used,
              concentre, serment_actif, serment_bonus, posture_active,
              designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges, mana_bonus_racial,
-             bonus_base_item, bonus_pieces_item)
+             bonus_base_item, bonus_pieces_item, mana_max_bonus_item, pv_max_bonus_item)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
               self.tension, self.ferveur, self.versets, 
@@ -1253,7 +1259,8 @@ class Personnage:
               self.concentre, self.serment_actif, self.serment_bonus, self.posture_active,
               self.designation_target_id, self.designation_stacks, self.sentence_target_id, json.dumps(self.sentence_targets), self.passe_count,
               json.dumps(self.badges), getattr(self, 'mana_bonus_racial', 0),
-              getattr(self, 'bonus_base_item', 0), getattr(self, 'bonus_pieces_item', 0)))
+              getattr(self, 'bonus_base_item', 0), getattr(self, 'bonus_pieces_item', 0),
+              getattr(self, 'mana_max_bonus_item', 0), getattr(self, 'pv_max_bonus_item', 0)))
         
         conn.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (self.user_id, self.nom))
         conn.commit()
@@ -1305,6 +1312,8 @@ class Personnage:
         p.mana_bonus_racial = row['mana_bonus_racial'] if 'mana_bonus_racial' in row.keys() else 0
         p.bonus_base_item = row['bonus_base_item'] if 'bonus_base_item' in row.keys() else 0
         p.bonus_pieces_item = row['bonus_pieces_item'] if 'bonus_pieces_item' in row.keys() else 0
+        p.mana_max_bonus_item = row['mana_max_bonus_item'] if 'mana_max_bonus_item' in row.keys() else 0
+        p.pv_max_bonus_item = row['pv_max_bonus_item'] if 'pv_max_bonus_item' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
         p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
@@ -1358,6 +1367,8 @@ class Personnage:
         p.mana_bonus_racial = row['mana_bonus_racial'] if 'mana_bonus_racial' in row.keys() else 0
         p.bonus_base_item = row['bonus_base_item'] if 'bonus_base_item' in row.keys() else 0
         p.bonus_pieces_item = row['bonus_pieces_item'] if 'bonus_pieces_item' in row.keys() else 0
+        p.mana_max_bonus_item = row['mana_max_bonus_item'] if 'mana_max_bonus_item' in row.keys() else 0
+        p.pv_max_bonus_item = row['pv_max_bonus_item'] if 'pv_max_bonus_item' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
         p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
@@ -5056,6 +5067,8 @@ async def pigeon(interaction: discord.Interaction, joueur: discord.Member, messa
     app_commands.Choice(name="🏕️ Survie", value="survie"),
     app_commands.Choice(name="⚔️ Bonus Base (items)", value="bonus_base_item"),
     app_commands.Choice(name="🎲 Bonus Pièces (items)", value="bonus_pieces_item"),
+    app_commands.Choice(name="💚 Bonus PV Max (items)", value="pv_max_bonus_item"),
+    app_commands.Choice(name="🔵 Bonus Mana Max (items)", value="mana_max_bonus_item"),
 ])
 async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[str], valeur: int):
     # 1. Chargement
@@ -5079,6 +5092,9 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
     if code_stat == "mana_max" and p.mana > valeur:
         p.mana = valeur
 
+    # Si on modifie une stat qui affecte les dérivés, recalculer
+    if code_stat in ['int_stat', 'sag', 'mana_max_bonus_item', 'pv_max_bonus_item', 'mana_bonus_racial']:
+        p.recalculer_derives()
     p.sauvegarder()
 
     # 4. Confirmation
@@ -6783,6 +6799,10 @@ async def gm_levelup(interaction: discord.Interaction, joueur: discord.Member, n
     app_commands.Choice(name="✨ Esprit", value="esp"),
     app_commands.Choice(name="🧠 Intelligence", value="int_stat"),
     app_commands.Choice(name="🧱 Robustesse (Armure/Items)", value="robustesse"),
+    app_commands.Choice(name="⚔️ Bonus Base (items)", value="bonus_base_item"),
+    app_commands.Choice(name="🎲 Bonus Pièces (items)", value="bonus_pieces_item"),
+    app_commands.Choice(name="💚 Bonus PV Max (items)", value="pv_max_bonus_item"),
+    app_commands.Choice(name="🔵 Bonus Mana Max (items)", value="mana_max_bonus_item"),
 ])
 async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choice[str], valeur: int):
     # Sécurité GM
