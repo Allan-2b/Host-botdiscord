@@ -5083,14 +5083,33 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
     # Petite sécurité pour ne pas mettre des PV négatifs par erreur
     if valeur < 0 and "pv" in code_stat:
         valeur = 0
-        
-    setattr(p, code_stat, valeur)
-    
+
+    # Si on modifie mana_max ou pv_max directement, stocker le delta dans bonus_item
+    # pour que recalculer_derives le prenne en compte et ne l'écrase pas
+    if code_stat == "mana_max":
+        p.recalculer_derives()  # calcule la base actuelle
+        base_actuelle = p.mana_max
+        delta = valeur - base_actuelle
+        p.mana_max_bonus_item = getattr(p, 'mana_max_bonus_item', 0) + delta
+        p.recalculer_derives()
+        code_stat = "mana_max_bonus_item"
+        ancienne_valeur = p.mana_max
+    elif code_stat == "pv_max":
+        p.recalculer_derives()
+        base_actuelle = p.pv_max
+        delta = valeur - base_actuelle
+        p.pv_max_bonus_item = getattr(p, 'pv_max_bonus_item', 0) + delta
+        p.recalculer_derives()
+        code_stat = "pv_max_bonus_item"
+        ancienne_valeur = p.pv_max
+    else:
+        setattr(p, code_stat, valeur)
+
     # Si on modifie les PV Max, on ne touche pas aux PV actuels (sauf si actuels > max)
-    if code_stat == "pv_max" and p.pv_actuel > valeur:
-        p.pv_actuel = valeur
-    if code_stat == "mana_max" and p.mana > valeur:
-        p.mana = valeur
+    if p.pv_actuel > p.pv_max:
+        p.pv_actuel = p.pv_max
+    if p.mana > p.mana_max:
+        p.mana = p.mana_max
 
     # Si on modifie une stat qui affecte les dérivés, recalculer
     if code_stat in ['int_stat', 'sag', 'mana_max_bonus_item', 'pv_max_bonus_item', 'mana_bonus_racial']:
