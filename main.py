@@ -1713,12 +1713,16 @@ def parse_cibles_sec(cibles_str: str):
             result.append(p_sec)
     return result
 
-def appliquer_statuts_aoe(persos_sec, data_sort):
+def appliquer_statuts_aoe(persos_sec, data_sort, heads=0):
     """Applique les statuts du sort immédiatement sur les fiches secondaires.
-    Les dégâts restent à défendre via /defense. Retourne lignes de msg."""
+    Vérifie le seuil du sort. Les dégâts restent à défendre via /defense."""
     icones_s = {"poison":"☠️","brulure":"🔥","gel":"❄️","stun":"💫",
                 "root":"🌳","hemorragie":"🩸","mutilation":"🦴"}
+    seuil = data_sort.get("seuil", 0)
     lignes = []
+    # Vérifier le seuil — si pas atteint, aucun effet appliqué
+    if seuil > 0 and heads < seuil:
+        return [f"*Seuil {seuil} non atteint ({heads} 🟡) — Effets zone annulés.*"]
     for p_sec in persos_sec:
         appliques = []
         for effet, valeur in data_sort.get("status", {}).items():
@@ -2705,6 +2709,16 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     # Poison non appliqué sur Action Bonus (exemption volontaire)
 
     json_data = skill_data.get('data_json', '{}')
+
+    # --- DÉSIGNATION (Loge de l'Ombre) — appliquée AVANT le seuil/traiter ---
+    msg_designation_pre = ""
+    if "loge_ombre" in p.sous_classes_unlocked and p_cible and p.designation_target_id == p_cible.user_id:
+        pieces_bonus_d_pre, msg_designation_pre = appliquer_designation(p, p_cible, skill_data)
+        if pieces_bonus_d_pre > 0:
+            skill_obj.coins += pieces_bonus_d_pre
+            total, visuel, heads = skill_obj.roll(bonus_niveau=bonus_niv)
+            visuel.append(f"🎯+{pieces_bonus_d_pre}(Désig)")
+
     total, msg_effets_spe = traiter_effets_json(json_data, p, p_cible, total, heads=heads)
 
     # Masse Initiale (Magie Gravitationnelle P1) : sorts TC → +1 Lestage si cible ≥ 3 Lestages
@@ -3826,7 +3840,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
                 value=f"{noms_sec} :\n👉 **`/defense` contre {damage_final} dégâts !**\n*(Les effets de statut sont appliqués immédiatement)*",
                 inline=False
             )
-            lignes_aoe = appliquer_statuts_aoe(persos_sec, data_gagnant)
+            lignes_aoe = appliquer_statuts_aoe(persos_sec, data_gagnant, heads=heads_final)
             if lignes_aoe:
                 embed_fin.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_aoe), inline=False)
 
@@ -3855,7 +3869,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
                         value=f"{noms_sec_atq} :\n👉 **`/defense` contre {dmg_zone} dégâts** (dégâts de base, clash perdu)\n*(Les effets de statut sont appliqués immédiatement)*",
                         inline=False
                     )
-                    lignes_aoe_atq = appliquer_statuts_aoe(persos_sec_atq, data_a)
+                    lignes_aoe_atq = appliquer_statuts_aoe(persos_sec_atq, data_a, heads=heads_a)
                     if lignes_aoe_atq:
                         embed_fin.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_aoe_atq), inline=False)
 
@@ -4097,14 +4111,8 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         if "air" in bonus_res:
             msg_resonance += f"\n💨 **Résonance Air** : +{bonus_res['air']} Esquive (passif)."
 
-    # --- DÉSIGNATION (Loge de l'Ombre) ---
-    msg_designation = ""
-    if "loge_ombre" in p.sous_classes_unlocked and p.designation_target_id == p_cible.user_id:
-        pieces_bonus_d, msg_designation = appliquer_designation(p, p_cible, skill_data)
-        if pieces_bonus_d > 0:
-            skill_obj.coins += pieces_bonus_d
-            total, visuel, heads = skill_obj.roll(bonus_niveau=bonus_niv)
-            visuel.append(f"🎯+{pieces_bonus_d}(Désig)")
+    # --- DÉSIGNATION — traitée avant le roll, msg récupéré ---
+    msg_designation = msg_designation_pre
 
     # --- SENTENCE (Inquisiteur) ---
     msg_sentence = ""
@@ -4244,7 +4252,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         persos_sec = parse_cibles_sec(cibles_secondaires)
         noms_sec = ", ".join(f"**{ps.nom}** (<@{ps.user_id}>)" for ps in persos_sec) if persos_sec else cibles_secondaires
         embed.add_field(name="💥 Cibles Collatérales", value=f"{noms_sec} : dans la zone !\n👉 **`/defense` contre {total} dégâts !**", inline=False)
-        lignes_effets = appliquer_statuts_aoe(persos_sec, data_parse)
+        lignes_effets = appliquer_statuts_aoe(persos_sec, data_parse, heads=heads)
         if lignes_effets:
             embed.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_effets), inline=False)
 
@@ -4253,7 +4261,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         persos_sec = parse_cibles_sec(cibles_secondaires)
         noms_sec = ", ".join(f"**{ps.nom}** (<@{ps.user_id}>)" for ps in persos_sec) if persos_sec else cibles_secondaires
         embed.add_field(name="💥 Cible Secondaire (demi-dégâts)", value=f"{noms_sec} !\n👉 **`/defense` contre {total_reduit} dégâts** (frappe réduite de moitié) !", inline=False)
-        lignes_effets = appliquer_statuts_aoe(persos_sec, data_parse)
+        lignes_effets = appliquer_statuts_aoe(persos_sec, data_parse, heads=heads)
         if lignes_effets:
             embed.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_effets), inline=False)
 
