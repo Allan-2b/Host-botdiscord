@@ -5260,7 +5260,7 @@ async def fiche(interaction: discord.Interaction):
     # 1. Chargement
     p: Personnage = Personnage.charger(interaction.user.id)
     if not p: 
-        return await interaction.response.send_message("❌ Pas de fiche. Utilisez **/creation**.", ephemeral=True)
+        return await interaction.response.send_message("Pas de fiche. Utilisez **/creation**.", ephemeral=True)
     
     # --- A. COULEURS & AMBIANCE SELON LA CLASSE ---
     # Guerrier = Rouge sang, Mage = Violet mystique, Prêtre = Or divin
