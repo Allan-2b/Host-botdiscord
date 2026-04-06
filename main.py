@@ -380,17 +380,23 @@ def get_serment_bonus(p: 'Personnage') -> int:
     return p.serment_bonus
 
 def calculer_serment(p: 'Personnage', degats_subis: int):
-    """Accumule le bonus Serment : +1 par tranche de 10 PV reçus (min +1).
-    Sous 30% PV le plafond monte à 12 (ou 15 avec Corps de Fer) mais s'accumule normalement.
-    Rien ne consomme le bonus."""
+    """Serment du Sang — nouvelle règle :
+    - S'active uniquement sous 40% PV.
+    - +1 par tranche de 5 PV perdus (min +1).
+    - Plafond : 8 normal | 10 avec Corps de Fer.
+    - Sous 30% PV : plafond monte à 12 | 15 avec Corps de Fer.
+    """
     if not p.serment_actif: return
+    seuil_40 = p.pv_max * 0.4
+    # Le Serment ne s'accumule que sous 40% PV
+    if p.pv_actuel > seuil_40:
+        return
     seuil_30 = p.pv_max * 0.3
-    # Le plafond dépend des PV actuels
     if p.pv_actuel <= seuil_30:
         max_actuel = 15 if "passif_nord_fer" in p.competences else 12
     else:
         max_actuel = 10 if "passif_nord_fer" in p.competences else 8
-    gain = max(1, degats_subis // 10)
+    gain = max(1, degats_subis // 5)
     p.serment_bonus = min(max_actuel, p.serment_bonus + gain)
 
 def appliquer_fureur_tribale(p: 'Personnage', pv_avant: int, degats: int) -> str:
@@ -843,7 +849,7 @@ def populate_spells():
         ("passif_nord_peau",      "[Peau de Pierre] (Passif)",     '["clan_nord"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "+2 Robustesse permanente.", "passif", "spe", '{"passif": "nord_peau", "rob_bonus": 2}'),
         ("passif_nord_machoire",  "[Mâchoire de Fer] (Passif)",    '["clan_nord"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Poison/Brûlure n'appliquent dégâts que tous les 2 tours.", "passif", "spe", '{"passif": "nord_machoire"}'),
         ("passif_nord_fureur",    "[Fureur Tribale] (Passif)",     '["clan_nord"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "Passage sous 50% PV : +2 Tension immédiatement (une seule fois par combat).", "passif", "spe", '{"passif": "nord_fureur"}'),
-        ("passif_nord_fer",       "[Corps de Fer] (Passif)",       '["clan_nord"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "Serment bonus max +10 / +15 sous 30% PV.", "passif", "spe", '{"passif": "nord_fer"}'),
+        ("passif_nord_fer",       "[Corps de Fer] (Passif)",       '["clan_nord"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "Serment max +10 (40% PV) / +15 sous 30% PV.", "passif", "spe", '{"passif": "nord_fer"}'),
         ("passif_nord_indestructible","[L'Indestructible] (Passif)",'["clan_nord"]', 5, 5, 0,0,0,"phy",0,"tension",0,0, "+5 PV au Serment. Une survie à 1 PV par combat.", "passif", "spe", '{"passif": "nord_indestructible"}'),
         # P1
         ("nord_coup_tete_novice", "Coup de Tête Novice",           '["clan_nord"]', 1, 1, 4, 3, 2, "phy", 1, "tension", 0, 2, "Impact frontal surprenant.", "actif", "spe", '{"seuil": 2, "status": {"stun": 1}, "bonus_si_serment_degats": {"tension_bonus": 1}}'),
@@ -5260,7 +5266,7 @@ async def fiche(interaction: discord.Interaction):
     # 1. Chargement
     p: Personnage = Personnage.charger(interaction.user.id)
     if not p: 
-        return await interaction.response.send_message("Pas de fiche. Utilisez **/creation**.", ephemeral=True)
+        return await interaction.response.send_message("❌ Pas de fiche. Utilisez **/creation**.", ephemeral=True)
     
     # --- A. COULEURS & AMBIANCE SELON LA CLASSE ---
     # Guerrier = Rouge sang, Mage = Violet mystique, Prêtre = Or divin
