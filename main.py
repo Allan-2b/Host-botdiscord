@@ -2695,10 +2695,6 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     total, visuel, heads = skill_obj.roll(bonus_niveau=p.get_bonus_niveau(), force_pile=fp_ab)
     if fp_ab: visuel.append("🔮(Toutes Pile !)")
 
-    if p.classe == "pretre" and heads > 0:
-        p.ferveur += heads
-        visuel.append(f"🙏(+{heads} Ferv)")
-
     if skill_obj.coins > skill_data["coins"]: visuel.append("⚡(+2 Pièces)")
     # Poison non appliqué sur Action Bonus (exemption volontaire)
 
@@ -3225,10 +3221,6 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: str, perso
     total_soin, visuel, heads = skill_obj.roll(bonus_niveau=p.get_bonus_niveau())
     json_data = skill_data.get('data_json', '{}')
     total, msg_effets_spe = traiter_effets_json(json_data, p, p_cible, total_soin, heads=heads)
-    if p.classe == "pretre" and heads > 0:
-        p.ferveur += heads
-        visuel.append(f"🙏(+{heads} Ferv)")
-
     # --- MOINE DU LOTUS : soin_base (fixe) + concentre_bonus + self_dmg ---
     data_j = json.loads(skill_data.get("data_json", "{}"))
     msg_lotus_soin = ""
@@ -3393,6 +3385,13 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
         else: stat_nom = skill_data["stat_type"].upper(); stat_valeur = getattr(p_attaquant, skill_data["stat_type"], 0)
 
     skill_obj = Skill(skill_data["nom"], skill_data["base"] + getattr(p_attaquant, 'bonus_base_item', 0), skill_data["bonus"], skill_data["coins"] + getattr(p_attaquant, 'bonus_pieces_item', 0), stat_bonus=stat_valeur, stat_nom=stat_nom)
+    # --- malus_base / malus_bonus_pieces (Briseur d'Os, Touche du Destin) ---
+    _malus_b_clash = p_attaquant.effets.pop("malus_base", None)
+    if _malus_b_clash:
+        skill_obj.base = max(0, skill_obj.base - _malus_b_clash["valeur"])
+    _malus_bp_clash = p_attaquant.effets.pop("malus_bonus_pieces", None)
+    if _malus_bp_clash:
+        skill_obj.bonus = max(0, skill_obj.bonus - _malus_bp_clash["valeur"])
 
     if "hate" in p_attaquant.effets:
         skill_obj.coins += 2
@@ -3623,13 +3622,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
             tot_b += drake_b; vis_b.append(f"🐲+{drake_b}(Drakéide)")
         fp_a = False; fp_b = False  # Ne s'applique qu'au premier round
         
-        # --- RÉSONANCE DIVINE (DANS LE CLASH) ---
-        if p_attaquant.classe == "pretre" and heads_a > 0:
-            p_attaquant.ferveur += heads_a
-            vis_a.append(f"🙏(+{heads_a})")
-        if p_defenseur.classe == "pretre" and heads_b > 0:
-            p_defenseur.ferveur += heads_b
-            vis_b.append(f"🙏(+{heads_b})")
+        # Résonance Divine supprimée — Ferveur gagnée uniquement via Prière Constante (+5/tour)
 
         # Comparaison
         resultat_txt = ""; color_embed = 0x3498db
@@ -3682,9 +3675,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
 
         damage_final, vis_fin, heads_final = final_skill.roll(bonus_niveau=bonus_v)
 
-        if vainqueur.classe == "pretre" and heads_final > 0:
-            vainqueur.ferveur += heads_final
-            vis_fin.append(f"🙏(+{heads_final} Ferv)")
+
 
         ref_vainqueur = None
         for k, v in SKILLS_DB.items():
@@ -3997,10 +3988,6 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         del p.effets["force_pile"]
     total, visuel, heads = skill_obj.roll(bonus_niveau=bonus_niv, force_pile=fp)
     if fp: visuel.append("🔮(Toutes Pile !)")
-
-    if p.classe == "pretre" and heads > 0:
-        p.ferveur += heads
-        visuel.append(f"🙏(+{heads} Ferv)")
 
     if skill_obj.coins > skill_data["coins"]: visuel.append("⚡(+2 Pièces)")
     if "poison" in p.effets:
