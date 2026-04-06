@@ -1821,6 +1821,22 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         retire = [e for e in negatifs if e in attaquant.effets]
         for e in retire: del attaquant.effets[e]
         if retire: msg.append(f"✨ **Purification** : {', '.join(retire)} retiré(s).")
+    # Cracher le Sang : retire 1 stack de Poison ou Brûlure uniquement
+    if data.get("cleanse_self_dot"):
+        dots = ["poison", "brulure"]
+        retire_dot = []
+        for dot in dots:
+            if dot in attaquant.effets:
+                attaquant.effets[dot]["valeur"] = max(0, attaquant.effets[dot]["valeur"] - 1)
+                if attaquant.effets[dot]["valeur"] <= 0:
+                    del attaquant.effets[dot]
+                    retire_dot.append(f"{dot.capitalize()} retiré")
+                else:
+                    retire_dot.append(f"{dot.capitalize()} réduit (−1 stack)")
+        if retire_dot:
+            msg.append(f"🩸 **Cracher le Sang** : {', '.join(retire_dot)} !")
+        else:
+            msg.append("🩸 **Cracher le Sang** : Aucun Poison ou Brûlure actif.")
     if data.get("cleanse_target"):
         retire = [e for e in negatifs if e in defenseur.effets]
         for e in retire: del defenseur.effets[e]
