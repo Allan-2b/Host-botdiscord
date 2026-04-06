@@ -3893,6 +3893,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
 async def attaque(interaction: discord.Interaction, sort: str, cible: str, description: str, personnage: str = None,
                   cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None):
     await interaction.response.defer()
+    msg_designation_pre = ""
     cibles_secondaires = " ".join(s for s in [cible_sec1, cible_sec2, cible_sec3] if s) or None
     p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     p_cible = parse_cible_arg(cible)
