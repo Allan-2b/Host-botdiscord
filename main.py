@@ -3747,6 +3747,18 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
             damage_final, msg_v = traiter_effets_json(json_v, vainqueur, perdant, damage_final, heads=heads_final)
             if msg_v: bonus_txt += f"\n{msg_v}"
 
+            # --- SINGULARITÉ : consommation sur tout sort offensif (clash) ---
+            _data_clash_sing = {}
+            try: _data_clash_sing = json.loads(json_v)
+            except (json.JSONDecodeError, TypeError): pass
+            if not _data_clash_sing.get("check_singularite_all") and "singularite" in perdant.effets:
+                ignore_sing_c, bonus_sing_c, msg_sing_c = consommer_singularite(perdant, vainqueur)
+                if ignore_sing_c:
+                    damage_final += bonus_sing_c
+                    vainqueur._ignore_armor = True
+                    vainqueur._ignore_rob = True
+                    bonus_txt += f"\n{msg_sing_c}"
+
             # Masse Initiale (Magie Gravitationnelle P1) : sorts TC → +1 Lestage si cible ≥ 3 Lestages
             sort_data_v = SKILLS_DB[ref_vainqueur]
             if "passif_grav_masse" in vainqueur.competences and sort_data_v.get("cat") == "tronc":
@@ -4083,6 +4095,19 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
             ajouter_lestage(p_cible, 1, p)
             msg_effets_spe = (msg_effets_spe or "") + "\n⚫ **Masse Initiale** : +1 Lestage bonus (cible portait ≥ 3 Lestages) !"
 
+    # --- SINGULARITÉ : consommation sur tout sort offensif (sauf sorts qui gèrent eux-mêmes via check_singularite_all) ---
+    msg_singularite = ""
+    _data_parse_sing = {}
+    try: _data_parse_sing = json.loads(skill_data.get("data_json", "{}"))
+    except (json.JSONDecodeError, TypeError): pass
+    if not _data_parse_sing.get("check_singularite_all") and "singularite" in p_cible.effets:
+        ignore_sing, bonus_sing_val, msg_sing_txt = consommer_singularite(p_cible, p)
+        if ignore_sing:
+            total += bonus_sing_val
+            p._ignore_armor = True
+            p._ignore_rob = True
+            msg_singularite = f"\n{msg_sing_txt}"
+
     # --- Passifs & Mécaniques ---
     if "gel" in p_cible.effets:
         total = int(total * 1.5)
@@ -4282,7 +4307,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     if msg_sadisme: msg_v4 += msg_sadisme
     if msg_estoc_maitre: msg_v4 += msg_estoc_maitre
     if msg_regulateur: msg_v4 += msg_regulateur
-    embed.description = f"**{p.nom}** attaque **{p_cible.nom}** !\n*« {description} »*{msg_hemo}{msg_festin}{msg_resonance}{msg_v4}{msg_bonus_manuel}"
+    embed.description = f"**{p.nom}** attaque **{p_cible.nom}** !\n*« {description} »*{msg_hemo}{msg_festin}{msg_resonance}{msg_v4}{msg_bonus_manuel}{msg_singularite}"
     
     calcul_txt = f"Base {skill_obj.base} + ({heads}x{skill_obj.bonus}) + {stat_nom}"
     if cout_paye_en_pv: calcul_txt += " (PV🩸)"
