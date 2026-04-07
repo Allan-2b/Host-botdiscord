@@ -348,7 +348,7 @@ def ajouter_lestage(cible: 'Personnage', stacks: int, attaquant: 'Personnage' = 
     elif nouveau >= seuil_sing:
         note_avatar = " *(Avatar du Cosmos : seuil 4)*" if seuil_sing == 4 else ""
         msgs.append(f"  ↳ 🌑 **SINGULARITÉ**{note_avatar} : Prochaine attaque ignore Armure+Rob + Enracinement auto !")
-        cible.effets["singularite"] = {"duree": 1, "valeur": 1}
+        cible.effets["singularite"] = {"duree": 9999, "valeur": 1}
 
     return "\n".join(msgs)
 
@@ -2640,9 +2640,6 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     if cible and not p_cible: return await interaction.followup.send("❌ La cible n'a pas de fiche de personnage.", ephemeral=True)
     if p.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
 
-    dispo, msg_err = verifier_cooldown(p, sort)
-    if not dispo: return await interaction.followup.send(msg_err, ephemeral=True)
-
     if is_stun_actif(p): return await interaction.followup.send("💫 **Étourdi !** Impossible d'agir.", ephemeral=True)
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible d'agir.", ephemeral=True)
     if "no_bonus_action" in p.effets:
@@ -2651,6 +2648,9 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data = SKILLS_DB[sort]
+
+    dispo, msg_err = verifier_cooldown(p, sort)
+    if not dispo: return await interaction.followup.send(msg_err, ephemeral=True)
 
     if "(BONUS)" not in skill_data['nom'].upper():
         return await interaction.followup.send("❌ Ce sort n'est pas une **Action Bonus**.", ephemeral=True)
@@ -3305,22 +3305,21 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: str, perso
 @app_commands.describe(
     sort="Votre technique", cible="L'adversaire (tapez pour chercher)",
     description="Action RP", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)",
-    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)"
+    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)",
+    bonus_base="[Optionnel] Bonus fixe sur la Base (buff, circonstance MJ…)",
+    bonus_pieces="[Optionnel] Pièces bonus supplémentaires"
 )
 @app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete,
     cible_sec1=cible_fiche_autocomplete, cible_sec2=cible_fiche_autocomplete, cible_sec3=cible_fiche_autocomplete)
 async def clash(interaction: discord.Interaction, sort: str, cible: str, description: str, personnage: str = None,
-                cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None):
+                cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None,
+                bonus_base: int = 0, bonus_pieces: int = 0):
     await interaction.response.defer()
     cibles_secondaires = " ".join(s for s in [cible_sec1, cible_sec2, cible_sec3] if s) or None
     p_attaquant = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p_attaquant: return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
     if p_attaquant.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
 
-    dispo, msg_err = verifier_cooldown(p_attaquant, sort)
-    if not dispo:
-        return await interaction.followup.send(msg_err, ephemeral=True)
-    
     # --- VÉRIFICATION ÉTATS BLOQUANTS ---
     if is_stun_actif(p_attaquant): return await interaction.followup.send("💫 **Étourdi !** Impossible de lancer un clash.", ephemeral=True)
     if "gel" in p_attaquant.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible de bouger.", ephemeral=True)
@@ -3335,10 +3334,14 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
         if not (is_gm(interaction.user.id) and personnage):
             return await interaction.followup.send("❌ Cible invalide.", ephemeral=True)
     if cible_user_id in PENDING_CLASHES: return await interaction.followup.send(f"❌ Déjà défié.", ephemeral=True)
-    
+
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data = SKILLS_DB[sort]
+
+    dispo, msg_err = verifier_cooldown(p_attaquant, sort)
+    if not dispo:
+        return await interaction.followup.send(msg_err, ephemeral=True)
 
     if skill_data.get('type') == 'soin': return await interaction.followup.send(f"🚫 C'est un soin.", ephemeral=True)
 
@@ -3413,6 +3416,17 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
     if _malus_bp_clash:
         skill_obj.bonus = max(0, skill_obj.bonus - _malus_bp_clash["valeur"])
 
+    # --- BONUS MANUELS (paramètres optionnels) ---
+    msg_bonus_manuel_clash = ""
+    if bonus_base != 0:
+        skill_obj.base = max(0, skill_obj.base + bonus_base)
+        signe = "+" if bonus_base > 0 else ""
+        msg_bonus_manuel_clash += f"\n✨ **Bonus Base** : {signe}{bonus_base}"
+    if bonus_pieces != 0:
+        skill_obj.coins = max(1, skill_obj.coins + bonus_pieces)
+        signe = "+" if bonus_pieces > 0 else ""
+        msg_bonus_manuel_clash += f"\n✨ **Bonus Pièces** : {signe}{bonus_pieces}"
+
     if "hate" in p_attaquant.effets:
         skill_obj.coins += 2
         cout_msg += " ⚡(Hâte)"
@@ -3438,7 +3452,7 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
     }
 
     embed = discord.Embed(title="⚔️ CLASH INITIÉ !", description=f"**{p_attaquant.nom}** provoque **{p_cible_clash.nom}** !", color=0xE67E22)
-    embed.add_field(name="Technique", value=f"⚡ **{skill_obj.nom}**\n*{skill_data['desc']}*{cout_msg}{msg_hemo}", inline=False)
+    embed.add_field(name="Technique", value=f"⚡ **{skill_obj.nom}**\n*{skill_data['desc']}*{cout_msg}{msg_hemo}{msg_bonus_manuel_clash}", inline=False)
     embed.add_field(name="Action", value=f"*« {description} »*", inline=False)
     embed.add_field(name="En attente...", value=f"👉 **{p_cible_clash.nom}** (<@{cible_user_id}>), répondez avec `/riposte` !", inline=False)
 
@@ -3449,12 +3463,15 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
 @bot.tree.command(name="riposte", description="Répondre à la commande /clash d'un adversaire")
 @app_commands.describe(
     sort="Votre technique", description="Action RP", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)",
-    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)"
+    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)",
+    bonus_base="[Optionnel] Bonus fixe sur la Base (buff, circonstance MJ…)",
+    bonus_pieces="[Optionnel] Pièces bonus supplémentaires"
 )
 @app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete,
     cible_sec1=cible_fiche_autocomplete, cible_sec2=cible_fiche_autocomplete, cible_sec3=cible_fiche_autocomplete)
 async def riposte(interaction: discord.Interaction, sort: str, description: str, personnage: str = None,
-                  cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None):
+                  cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None,
+                  bonus_base: int = 0, bonus_pieces: int = 0):
     cibles_secondaires = " ".join(s for s in [cible_sec1, cible_sec2, cible_sec3] if s) or None
     await interaction.response.defer()
     user_id = interaction.user.id
@@ -3480,7 +3497,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
     
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: 
-        PENDING_CLASHES[clash_key] = clash_data 
+        PENDING_CLASHES[user_id] = clash_data 
         return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data_b = SKILLS_DB[sort]
     if skill_data_b.get('type') == 'soin': return await interaction.followup.send(f"🚫 Impossible avec un soin.", ephemeral=True)
@@ -3488,7 +3505,13 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
     # --- BLOCAGE ACTIONS BONUS ---
     if "(BONUS)" in skill_data_b['nom'].upper() or "(BONUS)" in sort.upper():
         return await interaction.followup.send("❌ Impossible de **Riposter** avec une Action Bonus.\nUtilisez une compétence offensive ou défensive (MIX).", ephemeral=True)
-    
+
+    # --- VÉRIFICATION COOLDOWN DÉFENSEUR ---
+    dispo_rip, msg_err_rip = verifier_cooldown(p_defenseur, sort)
+    if not dispo_rip:
+        PENDING_CLASHES[user_id] = clash_data  # On remet le clash en attente
+        return await interaction.followup.send(msg_err_rip, ephemeral=True)
+
     # --- COÛT DÉFENSEUR ---
     cout = skill_data_b.get("cout", 0); cout_type = skill_data_b.get("cout_type", "mana")
     reduc_humain = p_defenseur.niveau // 3
@@ -3553,6 +3576,17 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
     if _malus_bp_rip:
         skill_b_org.bonus = max(0, skill_b_org.bonus - _malus_bp_rip["valeur"])
 
+    # --- BONUS MANUELS (paramètres optionnels) ---
+    msg_bonus_manuel_rip = ""
+    if bonus_base != 0:
+        skill_b_org.base = max(0, skill_b_org.base + bonus_base)
+        signe = "+" if bonus_base > 0 else ""
+        msg_bonus_manuel_rip += f"\n✨ **Bonus Base** : {signe}{bonus_base}"
+    if bonus_pieces != 0:
+        skill_b_org.coins = max(1, skill_b_org.coins + bonus_pieces)
+        signe = "+" if bonus_pieces > 0 else ""
+        msg_bonus_manuel_rip += f"\n✨ **Bonus Pièces** : {signe}{bonus_pieces}"
+
     if "hate" in p_defenseur.effets:
         skill_b_org.coins += 2
         await interaction.followup.send(f"⚡ **{p_defenseur.nom}** utilise sa vitesse surnaturelle (+2 Pièces) !", ephemeral=True)
@@ -3561,7 +3595,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
     if "titanenblut" in p_defenseur.effets:
         skill_b_org.coins += 1
 
-    await interaction.followup.send(f"⚔️ **Le Clash commence !**\n🔴 **{p_attaquant.nom}** vs 🔵 **{p_defenseur.nom}**{msg_hemo}")
+    await interaction.followup.send(f"⚔️ **Le Clash commence !**\n🔴 **{p_attaquant.nom}** vs 🔵 **{p_defenseur.nom}**{msg_hemo}{msg_bonus_manuel_rip}")
 
 # --- CALCUL DES MALUS ET BONUS ---
     # Poison : (5 + lvl) // 5
@@ -3886,12 +3920,15 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
 @app_commands.describe(
     sort="Votre technique", cible="L'adversaire (tapez pour chercher)",
     description="Action RP", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)",
-    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)"
+    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)",
+    bonus_base="[Optionnel] Bonus fixe sur la Base (buff, circonstance MJ…)",
+    bonus_pieces="[Optionnel] Pièces bonus supplémentaires"
 )
 @app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete, cible=cible_fiche_autocomplete,
     cible_sec1=cible_fiche_autocomplete, cible_sec2=cible_fiche_autocomplete, cible_sec3=cible_fiche_autocomplete)
 async def attaque(interaction: discord.Interaction, sort: str, cible: str, description: str, personnage: str = None,
-                  cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None):
+                  cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None,
+                  bonus_base: int = 0, bonus_pieces: int = 0):
     await interaction.response.defer()
     msg_designation_pre = ""
     cibles_secondaires = " ".join(s for s in [cible_sec1, cible_sec2, cible_sec3] if s) or None
@@ -3902,15 +3939,15 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     if not p_cible: return await interaction.followup.send("❌ La cible n'a pas de fiche.", ephemeral=True)
     if p.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
 
-    dispo, msg_err = verifier_cooldown(p, sort)
-    if not dispo: return await interaction.followup.send(msg_err, ephemeral=True)
-
     if is_stun_actif(p): return await interaction.followup.send("💫 **Étourdi !**", ephemeral=True)
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !**", ephemeral=True)
 
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
     skill_data = SKILLS_DB[sort]
+
+    dispo, msg_err = verifier_cooldown(p, sort)
+    if not dispo: return await interaction.followup.send(msg_err, ephemeral=True)
     
     if skill_data.get('type') == 'soin': return await interaction.followup.send(f"🚫 C'est un soin.", ephemeral=True)
     if "(BONUS)" in skill_data['nom'].upper() or "(BONUS)" in sort.upper():
@@ -4001,6 +4038,17 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     _malus_bp = p.effets.pop("malus_bonus_pieces", None)
     if _malus_bp:
         skill_obj.bonus = max(0, skill_obj.bonus - _malus_bp["valeur"])
+
+    # --- BONUS MANUELS (paramètres optionnels de la commande) ---
+    msg_bonus_manuel = ""
+    if bonus_base != 0:
+        skill_obj.base = max(0, skill_obj.base + bonus_base)
+        signe = "+" if bonus_base > 0 else ""
+        msg_bonus_manuel += f"\n✨ **Bonus Base** : {signe}{bonus_base}"
+    if bonus_pieces != 0:
+        skill_obj.coins = max(1, skill_obj.coins + bonus_pieces)
+        signe = "+" if bonus_pieces > 0 else ""
+        msg_bonus_manuel += f"\n✨ **Bonus Pièces** : {signe}{bonus_pieces}"
 
     bonus_niv = p.get_bonus_niveau()
     # --- Force Pile (Oracle Inversion de Probabilité) ---
@@ -4234,7 +4282,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     if msg_sadisme: msg_v4 += msg_sadisme
     if msg_estoc_maitre: msg_v4 += msg_estoc_maitre
     if msg_regulateur: msg_v4 += msg_regulateur
-    embed.description = f"**{p.nom}** attaque **{p_cible.nom}** !\n*« {description} »*{msg_hemo}{msg_festin}{msg_resonance}{msg_v4}"
+    embed.description = f"**{p.nom}** attaque **{p_cible.nom}** !\n*« {description} »*{msg_hemo}{msg_festin}{msg_resonance}{msg_v4}{msg_bonus_manuel}"
     
     calcul_txt = f"Base {skill_obj.base} + ({heads}x{skill_obj.bonus}) + {stat_nom}"
     if cout_paye_en_pv: calcul_txt += " (PV🩸)"
