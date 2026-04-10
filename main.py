@@ -5019,7 +5019,7 @@ async def meditation(interaction: discord.Interaction):
         if p.ferveur >= 75:
             return await interaction.response.send_message("🙏 Votre foi est déjà suffisamment haute (75+). Gardez votre énergie pour le combat.", ephemeral=True)
             
-        gain = 30 + (p.sag * 2)
+        gain = 20 + p.sag
         nouvelle_valeur = min(75, p.ferveur + gain)
         gain_reel = nouvelle_valeur - p.ferveur
         
