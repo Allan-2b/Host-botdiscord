@@ -3032,7 +3032,7 @@ async def tour(interaction: discord.Interaction,
                 rapport_effets.append("✨ **Aura de Sacrifice** : Ferveur insuffisante — Aura désactivée !")
 
         if p.classe == "pretre" and p.pv_actuel > 0:
-            gain_passif = 10
+            gain_passif = 5
             p.ferveur += gain_passif
             rapport_effets.append(f"🙏 **Prière Constante** : +{gain_passif} Ferveur.")
 
