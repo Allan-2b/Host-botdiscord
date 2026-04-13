@@ -79,6 +79,18 @@ async def log_combat(interaction: discord.Interaction, embed: discord.Embed):
 
 PENDING_CLASHES = {}
 LAST_ATTACKER = {}  # {defender_user_id: attacker_user_id} — pour Distorsion Permanente
+COMBAT_STATS = {}   # {user_id: {"nom":"","degats_infliges":0,"degats_recus":0,"soins":0}}
+
+def cs_get(user_id: int, nom: str = "") -> dict:
+    if user_id not in COMBAT_STATS:
+        COMBAT_STATS[user_id] = {"nom": nom, "degats_infliges": 0, "degats_recus": 0, "soins": 0}
+    elif nom:
+        COMBAT_STATS[user_id]["nom"] = nom
+    return COMBAT_STATS[user_id]
+
+def cs_add_infliges(uid, nom, v): cs_get(uid, nom)["degats_infliges"] += max(0, int(v))
+def cs_add_recus(uid, nom, v):   cs_get(uid, nom)["degats_recus"]    += max(0, int(v))
+def cs_add_soins(uid, nom, v):   cs_get(uid, nom)["soins"]           += max(0, int(v))
 
 def get_db_connection():
     conn = sqlite3.connect('/data/frieren_jdr.db')
@@ -1208,7 +1220,8 @@ class Personnage:
         self.mana_max = 0
         self.versets_max = 0
         if self.classe == "guerrier":
-            self.pv_max = 55 + ((self.niveau - 1) * 8) + getattr(self, 'pv_max_bonus_item', 0)
+            bonus_humain = (self.niveau // 3) * 2 if self.race == "Humain" else 0
+            self.pv_max = 55 + ((self.niveau - 1) * 8) + getattr(self, 'pv_max_bonus_item', 0) + bonus_humain
         elif self.classe == "mage":
             self.pv_max = 35 + ((self.niveau - 1) * 4) + getattr(self, 'pv_max_bonus_item', 0)
             self.mana_max = (self.int_stat * 8) + 10 + getattr(self, 'mana_bonus_racial', 0) + getattr(self, 'mana_max_bonus_item', 0) 
@@ -1268,7 +1281,13 @@ class Personnage:
               getattr(self, 'bonus_base_item', 0), getattr(self, 'bonus_pieces_item', 0),
               getattr(self, 'mana_max_bonus_item', 0), getattr(self, 'pv_max_bonus_item', 0)))
         
-        conn.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (self.user_id, self.nom))
+        # Ne mettre à jour la session que si ce personnage est déjà le personnage actif
+        # Évite d'écraser la session du MJ quand il sauvegarde un PNJ/monstre en combat
+        session_row = conn.execute('SELECT nom_perso_actif FROM sessions WHERE user_id = ?', (self.user_id,)).fetchone()
+        if session_row is None:
+            # Pas encore de session : on en crée une
+            conn.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (self.user_id, self.nom))
+        # Si une session existe déjà, on ne la touche pas — le MJ reste sur son perso actif
         conn.commit()
         conn.close()
 
@@ -1443,7 +1462,7 @@ class Personnage:
         
         if self.race == "Elfe":
             if self.classe == "mage": self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 3
-            elif self.classe == "guerrier": pass 
+            elif self.classe == "guerrier": self.acrobatie += 1; self.religion += 1; msg += " 🌿 +1 Acrobatie (Initiative), +1 Religion !"
             elif self.classe == "pretre": self.medecine += 1; self.religion += 1
 
         elif self.race == "Humain":
@@ -1457,7 +1476,9 @@ class Personnage:
             elif self.classe == "pretre": self.const += 1
 
         elif self.race == "Drakéide":
-            pass 
+            # +1 aux dégâts de base (bonus_base_item) à chaque pallier
+            self.bonus_base_item = getattr(self, 'bonus_base_item', 0) + 1
+            msg += " 🐲 +1 Dégâts de base (bonus permanent) !"
 
         elif self.race == "Féral":
             if self.classe == "mage":
@@ -1472,11 +1493,13 @@ class Personnage:
 
         elif self.race == "Céleste":
             if self.classe == "mage": self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 2
-            elif self.classe == "guerrier": pass 
+            elif self.classe == "guerrier": self.tension += 1; msg += " ✨ +1 Tension (bonus de départ permanent) !"
             elif self.classe == "pretre": self.versets_max += 1; self.versets += 1
 
         elif self.race == "Vampire":
-            pass 
+            if self.classe == "mage": self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 4; msg += " 🧛 +4 Mana Max !"
+            elif self.classe == "guerrier": self.pv_max += 3; self.pv_actuel += 3; msg += " 🧛 +3 PV Max (Régénération vampirique) !"
+            elif self.classe == "pretre": self.pv_max += 2; self.pv_actuel += 2; self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 2; msg += " 🧛 +2 PV Max, +2 Mana Max !"
 
         self.recalculer_derives()
         return msg
@@ -2627,17 +2650,22 @@ def is_stun_actif(p) -> bool:
     return not p.effets["stun"].get("nouveau", False)
 
 @bot.tree.command(name="action_bonus", description="⚡ Action rapide (Buff personnel, Soin, Drain)")
-@app_commands.describe(sort="La compétence à utiliser", description="Description RP", cible="[Optionnel] Ennemi pour les sorts de Drain", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(sort=action_bonus_autocomplete, personnage=joueur_perso_autocomplete)
-async def action_bonus(interaction: discord.Interaction, sort: str, description: str, cible: discord.Member = None, personnage: str = None):
+@app_commands.describe(sort="La compétence à utiliser", description="Description RP", cible="[Optionnel] Ennemi via @mention", cible_fiche="[Optionnel] Ennemi via nom de fiche (prioritaire sur @)", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
+@app_commands.autocomplete(sort=action_bonus_autocomplete, personnage=joueur_perso_autocomplete, cible_fiche=cible_fiche_autocomplete)
+async def action_bonus(interaction: discord.Interaction, sort: str, description: str, cible: discord.Member = None, cible_fiche: str = None, personnage: str = None):
     await interaction.response.defer() 
 
     p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
-    # Si une cible est fournie (ex: pour Transfusion), on la charge, sinon on cible soi-même
-    p_cible = Personnage.charger(cible.id) if cible else p
+    # cible_fiche (autocomplete fiche) prioritaire sur le @ Discord
+    if cible_fiche:
+        p_cible = parse_cible_arg(cible_fiche)
+    elif cible:
+        p_cible = Personnage.charger(cible.id)
+    else:
+        p_cible = p
 
     if not p: return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
-    if cible and not p_cible: return await interaction.followup.send("❌ La cible n'a pas de fiche de personnage.", ephemeral=True)
+    if (cible_fiche or cible) and not p_cible: return await interaction.followup.send("❌ La cible n'a pas de fiche de personnage.", ephemeral=True)
     if p.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
 
     if is_stun_actif(p): return await interaction.followup.send("💫 **Étourdi !** Impossible d'agir.", ephemeral=True)
@@ -2763,11 +2791,11 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     appliquer_cooldown(p, sort)
     
 
-    if cible and cible.id != interaction.user.id:
+    if p_cible and p_cible.user_id != p.user_id:
         p_cible.sauvegarder()
     p.sauvegarder()
     
-    nom_cible_txt = f" ➔ **{p_cible.nom}**" if cible else ""
+    nom_cible_txt = f" ➔ **{p_cible.nom}**" if (cible_fiche or cible) else ""
     embed = discord.Embed(title="⚡ ACTION BONUS", color=0x00FFFF)
     embed.description = f"**{p.nom}**{nom_cible_txt} : *« {description} »*"
     
@@ -2780,7 +2808,8 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
 
 
 @bot.tree.command(name="appliquer", description="Appliquer un effet (X automatique basé sur la durée)")
-@app_commands.describe(cible="La cible de l'effet", effet="Type d'effet", duree="Nombre de tours (définit le X)")
+@app_commands.describe(cible="[Optionnel] Cible via @", cible_fiche="[Optionnel] Cible via nom de fiche (prioritaire)", effet="Type d'effet", duree="Nombre de tours")
+@app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
 @app_commands.choices(effet=[
     app_commands.Choice(name="🔥 Brûlure (X Dégâts / X Tours)", value="brulure"),
     app_commands.Choice(name="☠️ Poison (Malus)", value="poison"),
@@ -2792,8 +2821,13 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     app_commands.Choice(name="⚡ Hâte", value="hate"),
     app_commands.Choice(name="🛡️ Armure (Bloque X dégâts / -1 Charge)", value="armure"),
 ])
-async def appliquer(interaction: discord.Interaction, cible: discord.Member, effet: app_commands.Choice[str], duree: int):
-    p_cible = Personnage.charger(cible.id)
+async def appliquer(interaction: discord.Interaction, effet: app_commands.Choice[str], duree: int, cible: discord.Member = None, cible_fiche: str = None):
+    if cible_fiche:
+        p_cible = parse_cible_arg(cible_fiche)
+    elif cible:
+        p_cible = Personnage.charger(cible.id)
+    else:
+        return await interaction.response.send_message("❌ Précisez une cible (@ ou nom de fiche).", ephemeral=True)
     if not p_cible: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
 
     # On ne passe plus de 3ème argument pour laisser l'auto-calcul (puissance = duree)
@@ -2804,7 +2838,7 @@ async def appliquer(interaction: discord.Interaction, cible: discord.Member, eff
     n_valeur = p_cible.effets[effet.value]["valeur"]
 
     embed = discord.Embed(title="✨ Statut Mis à Jour", color=0x9b59b6)
-    embed.description = f"**{effet.name}** sur {cible.mention}.\n⌛ Durée : **{n_duree}** | 💥 Puissance (X) : **{n_valeur}**"
+    embed.description = f"**{effet.name}** sur **{p_cible.nom}**.\n⌛ Durée : **{n_duree}** | 💥 Puissance (X) : **{n_valeur}**"
     await interaction.response.send_message(embed=embed)
 
 
@@ -3287,8 +3321,10 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: str, perso
         msg_peste = "\n☣️ **CONTAGION :** La corruption infecte le soigneur !"
         
     anciens_pv = p_cible.pv_actuel
+    soin_reel = min(p_cible.pv_max - p_cible.pv_actuel, total_soin)
     p_cible.pv_actuel = min(p_cible.pv_max, p_cible.pv_actuel + total_soin)
-    
+    cs_add_soins(p.user_id, p.nom, soin_reel)
+    cs_get(p_cible.user_id, p_cible.nom)  # init cible dans les stats
     appliquer_cooldown(p, sort)
     p.sauvegarder()
     p_cible.sauvegarder()
@@ -3854,8 +3890,14 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         if msg_clash_statut: bonus_txt += msg_clash_statut
         if msg_retour: bonus_txt += msg_retour
 
+        if vainqueur and damage_final > 0:
+            cs_add_infliges(vainqueur.user_id, vainqueur.nom, damage_final)
+            cs_get(perdant.user_id, perdant.nom)
+        ref_a_clash = clash_data.get('ref_a')
+        if ref_a_clash: appliquer_cooldown(p_attaquant, ref_a_clash)
+        appliquer_cooldown(p_defenseur, sort)
         p_attaquant.sauvegarder(); p_defenseur.sauvegarder()
-        # Distorsion Permanente : mémoriser l'attaquant du Clash pour /defense
+        # Distorsion Permanente
         LAST_ATTACKER[perdant.user_id] = vainqueur.user_id
         cibles_sec_gagnant = None
         data_gagnant = {}
@@ -4284,10 +4326,11 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         p.designation_stacks = 1  # nouvelle Désignation gratuite prête
         msg_regulateur = "\n🎯⭐ **Grand Régulateur** : Kill sur cible Désignée ! +15 Mana + Désignation rechargée !"
 
+    if total > 0: cs_add_infliges(p.user_id, p.nom, total)
+    cs_get(p_cible.user_id, p_cible.nom)
     appliquer_cooldown(p, sort)
     p.sauvegarder()
     p_cible.sauvegarder()
-    # Distorsion Permanente : mémoriser l'attaquant pour que /defense puisse lui coller un Lestage
     LAST_ATTACKER[p_cible.user_id] = p.user_id
 
     # Récupérer les flags ignore posés par traiter_effets_json
@@ -4537,6 +4580,7 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
             embed.add_field(name="⚔️ Posture Défensive", value=f"Robustesse doublée : **-{degats_bloques_pos}** dégâts.", inline=False)
 
     if degats_finaux > 0:
+        cs_add_recus(p.user_id, p.nom, degats_finaux)
         pv_avant_v4 = p.pv_actuel
         p.pv_actuel -= degats_finaux
         if p.classe == "guerrier":
@@ -4972,14 +5016,18 @@ async def mj_presage(interaction: discord.Interaction, joueur: discord.Member, v
     app_commands.Choice(name="⚡ Hâte", value="hate"),
     app_commands.Choice(name="🌑 Corruption", value="corruption")
 ])
-async def retire_effet(interaction: discord.Interaction, effet: app_commands.Choice[str], cible: discord.Member = None):
-    # 1. Définition de la cible (Soi-même si vide)
-    target_member = cible if cible else interaction.user
-    
-    # 2. Chargement du personnage
-    p: Personnage = Personnage.charger(target_member.id)
-    if not p: 
-        return await interaction.response.send_message(f"❌ **{target_member.display_name}** n'a pas de fiche.", ephemeral=True)
+@app_commands.describe(cible="[Optionnel] Cible via @", cible_fiche="[Optionnel] Cible via nom de fiche (prioritaire)")
+@app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
+async def retire_effet(interaction: discord.Interaction, effet: app_commands.Choice[str], cible: discord.Member = None, cible_fiche: str = None):
+    if cible_fiche:
+        p = parse_cible_arg(cible_fiche)
+        if not p: return await interaction.response.send_message("❌ Fiche introuvable.", ephemeral=True)
+    elif cible:
+        p = Personnage.charger(cible.id)
+        if not p: return await interaction.response.send_message(f"❌ **{cible.display_name}** n'a pas de fiche.", ephemeral=True)
+    else:
+        p = Personnage.charger(interaction.user.id)
+        if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
 
     code = effet.value
     msg = ""
@@ -5477,10 +5525,18 @@ async def fiche(interaction: discord.Interaction):
     if p.cooldowns:
         cds_txt = []
         for ref, tr in p.cooldowns.items():
-            # On récupère le nom propre du sort
-            nom_sort = SKILLS_DB.get(ref, {'nom': ref})['nom']
+            sk_cd = SKILLS_DB.get(ref)
+            if sk_cd:
+                nom_sort = sk_cd['nom']
+            else:
+                try:
+                    conn_cd = get_db_connection()
+                    row_cd = conn_cd.execute("SELECT nom FROM config_sorts WHERE ref = ?", (ref,)).fetchone()
+                    conn_cd.close()
+                    nom_sort = row_cd['nom'] if row_cd else ref
+                except Exception:
+                    nom_sort = ref
             cds_txt.append(f"⏳ **{nom_sort}** : {tr} tr")
-        
         if cds_txt:
             embed.add_field(name="⏳ Sorts en Recharge", value="\n".join(cds_txt), inline=False)
 
@@ -5630,6 +5686,11 @@ async def fin_combat(interaction: discord.Interaction):
         msg += "\n📜 **Inquisiteur** : Sentence(s) levée(s)."
     
     
+    # Reset cooldowns (en tours de combat — remis à zéro en fin de combat)
+    if p.cooldowns:
+        p.cooldowns = {}
+        msg += "\n⏳ **Cooldowns** remis à zéro."
+
     # --- LIQUIDATION DES EFFETS DoT RÉSIDUELS ---
     dot_msg = ""
     dot_total = 0
@@ -5668,6 +5729,15 @@ async def fin_combat(interaction: discord.Interaction):
 
     p.sauvegarder()
     embed = discord.Embed(title="Fin de Combat", description=msg, color=0x95a5a6)
+    if COMBAT_STATS:
+        lignes_stats = []
+        for uid, st in sorted(COMBAT_STATS.items(), key=lambda x: -x[1]["degats_infliges"]):
+            nm = st["nom"] or f"#{uid}"
+            lignes_stats.append(
+                f"**{nm}** — ⚔️ {st['degats_infliges']} infligés | 🛡️ {st['degats_recus']} reçus | 💚 {st['soins']} soins"
+            )
+        embed.add_field(name="📊 Stats du Combat", value="\n".join(lignes_stats), inline=False)
+        COMBAT_STATS.clear()
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="repos", description="Récupération totale (PV, Mana, Versets)")
@@ -6473,6 +6543,92 @@ async def apprendre(interaction: discord.Interaction, competence: str):
 #-------------------------------------------------------------------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------------------------------------------------------------------
 
+
+@bot.tree.command(name="gm_hud", description="(GM) Tableau de bord combat — PV/ressources/effets de tous les combattants")
+async def gm_hud(interaction: discord.Interaction):
+    if not is_gm(interaction.user.id):
+        return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+    await interaction.response.defer()
+    conn = get_db_connection()
+    rows = conn.execute("""
+        SELECT j.user_id, j.nom, j.classe, j.niveau,
+               j.pv_actuel, j.pv_max, j.mana, j.mana_max,
+               j.tension, j.ferveur, j.effets, j.cooldowns, j.const, j.robustesse
+        FROM sessions s
+        JOIN joueurs j ON j.user_id = s.user_id AND j.nom = s.nom_perso_actif
+        ORDER BY j.nom
+    """).fetchall()
+    conn.close()
+    if not rows:
+        return await interaction.followup.send("❌ Aucun personnage en session.", ephemeral=True)
+
+    def bar(cur, mx, n=8):
+        if mx <= 0: return "░" * n
+        f = round(max(0, cur) / mx * n)
+        pct = max(0, cur) / mx
+        ico = "🟩" if pct > 0.5 else ("🟨" if pct > 0.25 else "🟥")
+        return ico * f + "⬛" * (n - f)
+
+    ICONES = {"brulure":"🔥","poison":"☠️","hemorragie":"🩸","gel":"❄️","stun":"💫","root":"🌳","hate":"⚡","corruption":"🌑","armure":"🛡️"}
+    CLASSE_ICO = {"guerrier":"⚔️","mage":"🔮","pretre":"🙏","monstre":"👹"}
+
+    embed = discord.Embed(title="📊 HUD Combat", color=0x2C3E50)
+    embed.set_footer(text=f"{len(rows)} combattant(s) en session • /gm_hud pour rafraîchir")
+
+    for r in rows:
+        try: effets = json.loads(r['effets']) if r['effets'] else {}
+        except: effets = {}
+        try: cooldowns = json.loads(r['cooldowns']) if r['cooldowns'] else {}
+        except: cooldowns = {}
+
+        pv_cur = r['pv_actuel']; pv_max = r['pv_max']
+        barre = bar(pv_cur, pv_max)
+        pct = round(max(0, pv_cur) / pv_max * 100) if pv_max > 0 else 0
+        classe = r['classe']
+
+        if classe == "guerrier":
+            rob = (r['robustesse'] or 0) + (r['const'] or 0)
+            res = f"💢 Tension: **{r['tension']}** | 🧱 Rob: {rob}"
+        elif classe == "mage":
+            res = f"🔵 Mana: **{r['mana']}/{r['mana_max']}**"
+        elif classe == "pretre":
+            res = f"🟨 Ferveur: **{r['ferveur']}**"
+        else:
+            res = f"🔵 Mana: **{r['mana']}/{r['mana_max']}**"
+
+        effets_txt = " ".join(
+            f"{ICONES.get(c,'❓')}{('∞' if d.get('duree',0)>=9000 else str(d.get('duree',0))+'t')}"
+            for c, d in effets.items() if not c.startswith("_")
+        )
+        cds_txt_parts = []
+        for ref, tr in cooldowns.items():
+            sk = SKILLS_DB.get(ref)
+            if sk:
+                nm_cd = sk['nom'][:12]
+            else:
+                try:
+                    conn_c = get_db_connection()
+                    row_c = conn_c.execute("SELECT nom FROM config_sorts WHERE ref=?", (ref,)).fetchone()
+                    conn_c.close()
+                    nm_cd = (row_c['nom'][:12] if row_c else ref[:10])
+                except: nm_cd = ref[:10]
+            cds_txt_parts.append(f"⏳{nm_cd}({tr}t)")
+
+        cs = COMBAT_STATS.get(r['user_id'], {})
+        stats_txt = f" | ⚔️{cs.get('degats_infliges',0)} 🛡️{cs.get('degats_recus',0)} 💚{cs.get('soins',0)}" if cs else ""
+
+        ko = "💀 " if pv_cur <= 0 else ""
+        lines = [f"`{barre}` **{pv_cur}/{pv_max}** ({pct}%){stats_txt}", res]
+        if effets_txt: lines.append("États: " + effets_txt)
+        if cds_txt_parts: lines.append("CD: " + " ".join(cds_txt_parts))
+
+        embed.add_field(
+            name=f"{ko}{CLASSE_ICO.get(classe,'👤')} {r['nom']} (Niv {r['niveau']})",
+            value="\n".join(lines),
+            inline=False
+        )
+    await interaction.followup.send(embed=embed)
+
 @bot.tree.command(name="gm_reset_combats", description="(GM) Vide la mémoire des clashs en attente en cas de bug/AFK.")
 async def gm_reset_combats(interaction: discord.Interaction):
     if not is_gm(interaction.user.id): 
@@ -6600,10 +6756,14 @@ async def gm_spawn(interaction: discord.Interaction, nom: str, niveau: int, clas
     if p.classe == "mage": p.mana = p.mana_max
     if p.classe == "pretre": p.versets = p.versets_max
     
-    conn.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (interaction.user.id, nom))
+    session_mj = conn.execute('SELECT nom_perso_actif FROM sessions WHERE user_id = ?', (interaction.user.id,)).fetchone()
     conn.commit()
     conn.close()
     p.sauvegarder()
+    if session_mj:
+        conn_r = get_db_connection()
+        conn_r.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (interaction.user.id, session_mj['nom_perso_actif']))
+        conn_r.commit(); conn_r.close()
 
     # --- 6. AFFICHAGE ---
     embed = discord.Embed(title=f"👹 {nom} Généré !", color=0x800000 if race_defaut == "Monstre" else 0x3498db)
@@ -6685,7 +6845,8 @@ async def gm_add_boss_skill(interaction: discord.Interaction, nom: str, descript
     stat="Stat utilisée",
     effet_type="Ajouter un statut spécial à l'attaque ?",
     effet_val="Puissance de l'effet (ex: 2 pour Brûlure 2)",
-    zone="L'attaque touche-t-elle plusieurs personnes (AoE) ?"
+    zone="L'attaque touche-t-elle plusieurs personnes (AoE) ?",
+    cooldown_tours="Cooldown en tours de combat (0 = aucun)"
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Physique", value="phy"),
@@ -6704,7 +6865,7 @@ async def gm_freestyle(
     interaction: discord.Interaction, 
     nom: str, description: str, base: int, pieces: int, bonus: int, 
     stat: app_commands.Choice[str], 
-    effet_type: app_commands.Choice[str] = None, effet_val: int = 1, zone: bool = False
+    effet_type: app_commands.Choice[str] = None, effet_val: int = 1, zone: bool = False, cooldown_tours: int = 0
 ):
     if not is_gm(interaction.user.id): return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
@@ -6731,11 +6892,12 @@ async def gm_freestyle(
     conn = get_db_connection()
     conn.execute('''
         INSERT INTO config_sorts 
-        (ref, nom, classes, pallier, cout_achat, base, coins, bonus, stat_type, cout, cout_type, desc, type, cat, data_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (ref, nom, classes, pallier, cout_achat, base, coins, bonus, stat_type, cout, cout_type, cooldown, desc, type, cat, data_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         unique_id, nom, '["monstre"]', 1, 0, 
-        base, pieces, bonus, stat_code, 0, "mana", 
+        base, pieces, bonus, stat_code, 0, "mana",
+        cooldown_tours,
         description, "actif", "monstre", json_str
     ))
     conn.commit()
@@ -6760,9 +6922,10 @@ async def gm_freestyle(
     details = f"🎲 **Formule :** Base {base} + ({pieces}x{bonus}) + {stat.name}\n"
     if effet_type: 
         details += f"✨ **Effet :** {effet_type.name} ({effet_val})\n"
-    if zone: 
+    if zone:
         details += "💥 **Zone :** Touche plusieurs cibles\n"
-        
+    if cooldown_tours > 0:
+        details += f"⏳ **Cooldown :** {cooldown_tours} tours\n"
     embed.add_field(name="Paramètres", value=details, inline=False)
     embed.add_field(name="Narration", value=f"*{description}*", inline=False)
     
@@ -6772,7 +6935,8 @@ async def gm_freestyle(
 
         
 @bot.tree.command(name="gm_effet", description="(GM) Appliquer un état (Puissance optionnelle, défaut +1)")
-@app_commands.describe(joueur="Cible", effet="Type", duree="Tours", puissance="Valeur à ajouter au X (Défaut: 1)")
+@app_commands.describe(joueur="[Optionnel] Cible via @", cible_fiche="[Optionnel] Cible via nom de fiche (prioritaire)", effet="Type", duree="Tours", puissance="Puissance (Défaut: 1)")
+@app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
 @app_commands.choices(effet=[
     app_commands.Choice(name="🔥 Brûlure", value="brulure"),
     app_commands.Choice(name="☠️ Poison", value="poison"),
@@ -6783,13 +6947,17 @@ async def gm_freestyle(
     app_commands.Choice(name="🌑 Corruption", value="corruption"),
     app_commands.Choice(name="⚡ Hâte", value="hate"),
 ])
-async def gm_effet(interaction: discord.Interaction, joueur: discord.Member, effet: app_commands.Choice[str], duree: int, puissance: int = 1):
-    if not is_gm(interaction.user.id): 
+async def gm_effet(interaction: discord.Interaction, effet: app_commands.Choice[str], duree: int, joueur: discord.Member = None, cible_fiche: str = None, puissance: int = 1):
+    if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
-    
-    p = Personnage.charger(joueur.id)
-    if not p: 
-        return await interaction.response.send_message("Pas de fiche.", ephemeral=True)
+    if cible_fiche:
+        p = parse_cible_arg(cible_fiche)
+    elif joueur:
+        p = Personnage.charger(joueur.id)
+    else:
+        return await interaction.response.send_message("❌ Précisez une cible (@ ou nom de fiche).", ephemeral=True)
+    if not p:
+        return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
 
     p.ajouter_effet(effet.value, duree, puissance) 
     p.sauvegarder()
@@ -6797,10 +6965,7 @@ async def gm_effet(interaction: discord.Interaction, joueur: discord.Member, eff
     n_duree = p.effets[effet.value]["duree"]
     n_valeur = p.effets[effet.value]["valeur"]
 
-    await interaction.response.send_message(
-        f"✅ **{effet.name}** mis à jour sur **{p.nom}**.\n"
-        f"Nouveau total -> Durée: {n_duree} | Puissance (X): {n_valeur}"
-    )
+    await interaction.response.send_message(f"✅ **{effet.name}** sur **{p.nom}** → Durée: {n_duree} | X: {n_valeur}")
 
 @bot.tree.command(name="gm_incarner", description="(GM) Prendre le contrôle d'un PNJ existant")
 @app_commands.describe(nom="Nom exact du PNJ")
@@ -6852,11 +7017,14 @@ async def gm_creer(interaction: discord.Interaction, nom: str, classe: app_comma
         p = Personnage(user_id, nom, classe.value)
         # On force l'incarnation directe dessus
         conn = get_db_connection()
-        conn.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (user_id, nom))
-        conn.commit()
-        conn.close()
-        
-        await interaction.response.send_message(f"👹 PNJ **{p.nom}** créé et incarné !")
+        session_mj2 = conn.execute('SELECT nom_perso_actif FROM sessions WHERE user_id = ?', (user_id,)).fetchone()
+        conn.commit(); conn.close()
+        p.sauvegarder()
+        if session_mj2:
+            conn_r2 = get_db_connection()
+            conn_r2.execute('INSERT OR REPLACE INTO sessions VALUES (?, ?)', (user_id, session_mj2['nom_perso_actif']))
+            conn_r2.commit(); conn_r2.close()
+        await interaction.response.send_message(f"👹 PNJ **{p.nom}** créé ! Utilisez `/gm_incarner` pour l'incarner.")
     except Exception as e:
         await interaction.response.send_message(f"Erreur: {e}", ephemeral=True)
 
@@ -6898,7 +7066,8 @@ async def gm_levelup(interaction: discord.Interaction, joueur: discord.Member, n
 
 
 @bot.tree.command(name="gm_set_stat", description="(GM) Forcer une statistique à une valeur précise (Pour Monstres/Boss)")
-@app_commands.describe(stat="La stat à modifier", valeur="La valeur exacte")
+@app_commands.describe(stat="La stat à modifier", valeur="La valeur exacte", cible_fiche="[Optionnel] Fiche cible (MJ actif si vide)")
+@app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
 @app_commands.choices(stat=[
     app_commands.Choice(name="💚 PV Max", value="pv_max"),
     app_commands.Choice(name="💚 PV Actuels", value="pv_actuel"),
@@ -6914,14 +7083,14 @@ async def gm_levelup(interaction: discord.Interaction, joueur: discord.Member, n
     app_commands.Choice(name="💚 Bonus PV Max (items)", value="pv_max_bonus_item"),
     app_commands.Choice(name="🔵 Bonus Mana Max (items)", value="mana_max_bonus_item"),
 ])
-async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choice[str], valeur: int):
-    # Sécurité GM
+async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choice[str], valeur: int, cible_fiche: str = None):
     if not is_gm(interaction.user.id): return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
-
-    # On charge le personnage actif (celui que le GM incarne)
-    p: Personnage = Personnage.charger(interaction.user.id)
-    if not p:
-        return await interaction.response.send_message("❌ Vous n'incarnez personne.", ephemeral=True)
+    if cible_fiche:
+        p = parse_cible_arg(cible_fiche)
+        if not p: return await interaction.response.send_message("❌ Fiche introuvable.", ephemeral=True)
+    else:
+        p: Personnage = Personnage.charger(interaction.user.id)
+        if not p: return await interaction.response.send_message("❌ Incarnez un personnage ou précisez une cible_fiche.", ephemeral=True)
 
     code_stat = stat.value
     
@@ -7569,11 +7738,17 @@ async def depenser(interaction: discord.Interaction, or_p: int = 0, argent_p: in
     app_commands.Choice(name="➕ Donner", value="add"),
     app_commands.Choice(name="➖ Retirer", value="sub")
 ])
-async def gm_monnaie(interaction: discord.Interaction, action: app_commands.Choice[str], joueur: discord.Member, or_p: int = 0, argent_p: int = 0, bronze_p: int = 0):
-    if not is_gm(interaction.user.id): 
+@app_commands.describe(joueur="[Optionnel] Cible via @", cible_fiche="[Optionnel] Cible via nom de fiche (prioritaire)")
+@app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
+async def gm_monnaie(interaction: discord.Interaction, action: app_commands.Choice[str], joueur: discord.Member = None, cible_fiche: str = None, or_p: int = 0, argent_p: int = 0, bronze_p: int = 0):
+    if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
-        
-    p: Personnage = Personnage.charger(joueur.id)
+    if cible_fiche:
+        p = parse_cible_arg(cible_fiche)
+    elif joueur:
+        p = Personnage.charger(joueur.id)
+    else:
+        return await interaction.response.send_message("❌ Précisez une cible (@ ou nom de fiche).", ephemeral=True)
     if not p: return await interaction.response.send_message("❌ Joueur introuvable.", ephemeral=True)
     
     montant = (or_p * 100) + (argent_p * 10) + bronze_p
