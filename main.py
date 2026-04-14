@@ -2641,7 +2641,7 @@ def appliquer_cooldown(personnage: Personnage, sort_ref: str):
     if sort_ref in SKILLS_DB:
         cd = SKILLS_DB[sort_ref].get('cooldown', 0)
         if cd > 0:
-            personnage.cooldowns[sort_ref] = cd
+            personnage.cooldowns[sort_ref] = cd - 1
 
 def is_stun_actif(p) -> bool:
     """Retourne True si le stun bloque les actions (flag nouveau=False = tour suivant l'application)."""
