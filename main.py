@@ -3477,6 +3477,13 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
     if _flag_ma_clash:
         skill_obj.coins += _flag_ma_clash.get("valeur", 1)
 
+    # --- DÉSIGNATION (Loge de l'Ombre) — appliquée AVANT le clash ---
+    if "loge_ombre" in p_attaquant.sous_classes_unlocked and p_cible_clash and p_attaquant.designation_target_id == p_cible_clash.user_id:
+        pieces_bonus_d_clash, _ = appliquer_designation(p_attaquant, p_cible_clash, skill_data)
+        if pieces_bonus_d_clash > 0:
+            skill_obj.coins += pieces_bonus_d_clash
+            msg_bonus_manuel_clash += f"\n🎯 **Désignation** : +{pieces_bonus_d_clash} Pièces !"
+
     PENDING_CLASHES[cible_user_id] = {
         'attaquant_id': interaction.user.id,
         'skill_a': skill_obj,
@@ -3630,6 +3637,13 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
 
     if "titanenblut" in p_defenseur.effets:
         skill_b_org.coins += 1
+
+    # --- DÉSIGNATION (Loge de l'Ombre) — appliquée sur le défenseur (riposteur) ---
+    if "loge_ombre" in p_defenseur.sous_classes_unlocked and p_attaquant and p_defenseur.designation_target_id == p_attaquant.user_id:
+        pieces_bonus_d_rip, _ = appliquer_designation(p_defenseur, p_attaquant, skill_data_b)
+        if pieces_bonus_d_rip > 0:
+            skill_b_org.coins += pieces_bonus_d_rip
+            msg_bonus_manuel_rip += f"\n🎯 **Désignation** : +{pieces_bonus_d_rip} Pièces !"
 
     await interaction.followup.send(f"⚔️ **Le Clash commence !**\n🔴 **{p_attaquant.nom}** vs 🔵 **{p_defenseur.nom}**{msg_hemo}{msg_bonus_manuel_rip}")
 
@@ -4129,6 +4143,16 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         visuel.append("⚡🌪️(Décharge x2 Pièces)")
 
     json_data = skill_data.get('data_json', '{}')
+
+    # --- DÉSIGNATION (Loge de l'Ombre) — appliquée AVANT le seuil/traiter ---
+    msg_designation_pre = ""
+    if "loge_ombre" in p.sous_classes_unlocked and p_cible and p.designation_target_id == p_cible.user_id:
+        pieces_bonus_d_pre, msg_designation_pre = appliquer_designation(p, p_cible, skill_data)
+        if pieces_bonus_d_pre > 0:
+            skill_obj.coins += pieces_bonus_d_pre
+            total, visuel, heads = skill_obj.roll(bonus_niveau=bonus_niv)
+            visuel.append(f"🎯+{pieces_bonus_d_pre}(Désig)")
+
     total, msg_effets_spe = traiter_effets_json(json_data, p, p_cible, total, heads=heads)
 
     # Masse Initiale (Magie Gravitationnelle P1) : sorts TC → +1 Lestage si cible ≥ 3 Lestages
