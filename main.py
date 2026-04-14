@@ -6861,7 +6861,7 @@ async def gm_add_boss_skill(interaction: discord.Interaction, nom: str, descript
 
 
 
-@bot.tree.command(name="gm_freestyle", description="(GM) Créer une attaque sur mesure et l'ajouter à votre personnage actuel")
+@bot.tree.command(name="gm_freestyle", description="(GM) Créer une attaque sur mesure et l'ajouter à un personnage")
 @app_commands.describe(
     nom="Nom de l'attaque (ex: Souffle Ardent)", 
     description="Narration", 
@@ -6870,12 +6870,14 @@ async def gm_add_boss_skill(interaction: discord.Interaction, nom: str, descript
     effet_type="Ajouter un statut spécial à l'attaque ?",
     effet_val="Puissance de l'effet (ex: 2 pour Brûlure 2)",
     zone="L'attaque touche-t-elle plusieurs personnes (AoE) ?",
-    cooldown_tours="Cooldown en tours de combat (0 = aucun)"
+    cooldown_tours="Cooldown en tours de combat (0 = aucun)",
+    cible_fiche="[Optionnel] Donner le sort à une fiche spécifique (sinon : votre personnage actif)"
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Physique", value="phy"),
     app_commands.Choice(name="Esprit", value="esp"),
     app_commands.Choice(name="Agilité", value="agi"),
+    app_commands.Choice(name="Foi", value="foi"),
     app_commands.Choice(name="Brut (Aucune stat)", value="aucune")
 ], effet_type=[
     app_commands.Choice(name="🔥 Brûlure", value="brulure"),
@@ -6885,16 +6887,25 @@ async def gm_add_boss_skill(interaction: discord.Interaction, nom: str, descript
     app_commands.Choice(name="🌳 Enracinement", value="root"),
     app_commands.Choice(name="🦴 Mutilation", value="mutilation")
 ])
+@app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
 async def gm_freestyle(
     interaction: discord.Interaction, 
     nom: str, description: str, base: int, pieces: int, bonus: int, 
     stat: app_commands.Choice[str], 
-    effet_type: app_commands.Choice[str] = None, effet_val: int = 1, zone: bool = False, cooldown_tours: int = 0
+    effet_type: app_commands.Choice[str] = None, effet_val: int = 1, zone: bool = False, cooldown_tours: int = 0,
+    cible_fiche: str = None
 ):
     if not is_gm(interaction.user.id): return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
-    p: Personnage = Personnage.charger(interaction.user.id)
-    if not p: return await interaction.response.send_message("❌ Incarnez d'abord un personnage avec /gm_spawn.", ephemeral=True)
+    # Déterminer le personnage cible
+    if cible_fiche:
+        p_cible = parse_cible_arg(cible_fiche)
+        if not p_cible:
+            return await interaction.response.send_message("❌ Fiche introuvable.", ephemeral=True)
+    else:
+        p_cible = Personnage.charger(interaction.user.id)
+        if not p_cible:
+            return await interaction.response.send_message("❌ Incarnez d'abord un personnage avec /gm_spawn, ou précisez une cible_fiche.", ephemeral=True)
 
     # 1. Générer une ID unique
     unique_id = f"free_{int(time.time())}"
@@ -6903,7 +6914,6 @@ async def gm_freestyle(
     # 2. Construction du JSON des effets (automatique)
     data_effets = {}
     if effet_type:
-        # On met le seuil de réussite nécessaire à la moitié des pièces lancées
         seuil_moyen = max(1, pieces // 2)
         data_effets["seuil"] = seuil_moyen
         data_effets["status"] = {effet_type.value: effet_val}
@@ -6929,19 +6939,15 @@ async def gm_freestyle(
     
     reload_data()
     
-    # 4. Ajout direct à la fiche du monstre incarné (uniquement si c'est bien un monstre)
-    p: Personnage = Personnage.charger(interaction.user.id)
-    if p:
-        if p.classe == "monstre":
-            p.competences.append(unique_id)
-            p.sauvegarder()
-        else:
-            # Le MJ a une fiche joueur active — ne pas lui ajouter le sort de monstre
-            pass
+    # 4. Ajout à la fiche cible
+    p_cible = parse_cible_arg(cible_fiche) if cible_fiche else Personnage.charger(interaction.user.id)
+    if p_cible:
+        p_cible.competences.append(unique_id)
+        p_cible.sauvegarder()
 
     # 5. Affichage
     embed = discord.Embed(title="⚡ Compétence Créée & Équipée !", color=0xE67E22)
-    embed.description = f"**{p.nom}** a appris l'attaque **{nom}**.\n*Elle est désormais dans l'autocomplétion de `/clash` et `/attaque`.*"
+    embed.description = f"**{p_cible.nom}** a appris l'attaque **{nom}**.\n*Elle est désormais dans l'autocomplétion de `/clash` et `/attaque`.*"
     
     details = f"🎲 **Formule :** Base {base} + ({pieces}x{bonus}) + {stat.name}\n"
     if effet_type: 
