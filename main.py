@@ -590,7 +590,7 @@ def populate_spells():
         ("lumiere_divine_2", "Lumière Divine Évoluée", '["pretre"]', 2, 2, 6, 4, 2, "foi", 15, "ferveur", 0, 0, "Le rayon gagne en intensité.", "actif", "tronc", "{}"),
         ("heilige_aura_novice", "Heilige Aura Novice", '["pretre"]', 2, 2, 6, 3, 3, "foi", 20, "ferveur", 0, 2, "Onde d énergie purificatrice.", "actif", "tronc", '{"seuil": 1, "aoe": true}'),
         ("lichtstrahl", "Lichtstrahl", '["pretre"]', 2, 2, 9, 4, 2, "foi", 15, "ferveur", 0, 2, "Rayon de lumière aveuglant.", "actif", "tronc", '{"seuil": 2, "status": {"brulure": 2}}'),
-        ("zorn_gottes", "Zorn Gottes", '["pretre"]', 2, 2, 14, 4, 3, "foi", 25, "ferveur", 3, 3, "Éclair du ciel étourdissant (Coûte 3 Versets).", "actif", "tronc", '{"seuil": 2, "status": {"stun": 2}}'),
+        ("zorn_gottes", "Zorn Gottes", '["pretre"]', 2, 2, 11, 4, 2, "foi", 25, "ferveur", 3, 3, "Éclair du ciel étourdissant (Coûte 3 Versets).", "actif", "tronc", '{"seuil": 2, "status": {"stun": 1}}'),
         ("vision", "Vision (Bonus)", '["pretre"]', 2, 2, 0, 2, 0, "foi", 10, "ferveur", 0, 2, "Vision véritable.", "utilitaire", "tronc", '{"seuil": 1, "rp_effect": "Permet de voir les entités invisibles ou illusions."}'),
         ("stimme_gottes", "Stimme Gottes (Bonus)", '["pretre"]', 2, 2, 0, 2, 0, "foi", 10, "ferveur", 0, 2, "Autorité divine.", "utilitaire", "tronc", '{"seuil": 1, "rp_effect": "Force un groupe de PNJ à cesser le combat."}'),
         ("wunder", "Wunder (Bonus)", '["pretre"]', 2, 2, 0, 2, 0, "foi", 20, "ferveur", 3, 4, "Miracle mineur (Coûte 3 Versets).", "utilitaire", "tronc", '{"seuil": 1, "rp_effect": "Altère légèrement la réalité (réparer, ouvrir, etc.)."}'),
