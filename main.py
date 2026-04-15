@@ -374,6 +374,8 @@ def consommer_singularite(cible: 'Personnage', attaquant: 'Personnage') -> tuple
     del cible.effets["singularite"]
     # Reset lestages
     cible.effets.pop("lestage", None)
+    # Enracinement automatique (silencieux)
+    cible.ajouter_effet("root", 1)
     degats_bonus = 0
     msg = "🌑 **Singularité déclenchée !** Armure et Robustesse ignorées !"
     # Passif Point de Rupture (P3) : +8 dégâts fixes
