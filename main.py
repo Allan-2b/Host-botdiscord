@@ -2645,6 +2645,35 @@ def appliquer_cooldown(personnage: Personnage, sort_ref: str):
         if cd > 0:
             personnage.cooldowns[sort_ref] = cd
 
+def maj_etat_moine(p: 'Personnage', skill_data: dict, visuel: list) -> str:
+    """Gère les transitions d'état Concentré/Perturbé du Moine du Lotus.
+    - 2 sorts Tronc Commun consécutifs  → Perturbé  (si Concentré, sans Éveil P5)
+    - 2 sorts Sous-Classe consécutifs   → Concentré (si Perturbé)
+    Retourne un message de transition (vide si aucun changement).
+    """
+    if "moine_lotus" not in p.sous_classes_unlocked:
+        return ""
+
+    prev_action = p.last_action_type
+    action_type = "TC" if skill_data.get("cat") == "tronc" else "spe"
+    p.last_action_type = action_type
+    msg = ""
+
+    if "passif_lotus_eveil" not in p.competences:
+        # Concentré + 2 TC consécutives → Perturbé
+        if p.concentre and action_type == "TC" and prev_action == "TC":
+            p.concentre = 0
+            visuel.append("🔥(Perturbé!)")
+            msg = "\n🔥 **Perturbé !** Le flux est rompu."
+
+    # Perturbé + 2 sorts Sous-Classe consécutifs → Concentré
+    if not p.concentre and action_type == "spe" and prev_action == "spe":
+        p.concentre = 1
+        visuel.append("🌸(Concentré!)")
+        msg = "\n🌸 **Concentré !** L'équilibre est restauré."
+
+    return msg
+
 def is_stun_actif(p) -> bool:
     """Retourne True si le stun bloque les actions (flag nouveau=False = tour suivant l'application)."""
     if "stun" not in p.effets:
@@ -2792,7 +2821,7 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     
     appliquer_cooldown(p, sort)
     
-
+    msg_moine_ab = maj_etat_moine(p, skill_data, visuel)
     if p_cible and p_cible.user_id != p.user_id:
         p_cible.sauvegarder()
     p.sauvegarder()
@@ -2804,7 +2833,7 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     calcul_txt = f"Base {skill_obj.base} + ({heads}x{skill_obj.bonus}) + {stat_nom}"
     if cout_paye_en_pv: calcul_txt += " (PV🩸)"
     
-    embed.add_field(name=f"Technique : {skill_obj.nom}", value=f"*{skill_data['desc']}*{cout_msg}\n{' '.join(visuel)}\n`{calcul_txt}`{msg_effet}", inline=False)
+    embed.add_field(name=f"Technique : {skill_obj.nom}", value=f"*{skill_data['desc']}*{cout_msg}\n{' '.join(visuel)}\n`{calcul_txt}`{msg_effet}{msg_moine_ab}", inline=False)
     
     await interaction.followup.send(embed=embed)
 
@@ -3431,6 +3460,7 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
         msg_hemo = f"\n🩸 **Hémorragie** : L'effort ouvre vos plaies (-{val_hemo} PV)."
     
     appliquer_cooldown(p_attaquant, sort)
+    maj_etat_moine(p_attaquant, skill_data, [])
     p_attaquant.sauvegarder()
 
     # Préparation objet Skill
@@ -3912,6 +3942,10 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
         ref_a_clash = clash_data.get('ref_a')
         if ref_a_clash: appliquer_cooldown(p_attaquant, ref_a_clash)
         appliquer_cooldown(p_defenseur, sort)
+        # Moine du Lotus : mise à jour état concentré/perturbé pour les deux combattants
+        sort_data_a = SKILLS_DB.get(ref_a_clash, {}) if ref_a_clash else {}
+        maj_etat_moine(p_attaquant, sort_data_a, [])
+        maj_etat_moine(p_defenseur, skill_data_b, [])
         p_attaquant.sauvegarder(); p_defenseur.sauvegarder()
         # Distorsion Permanente
         LAST_ATTACKER[perdant.user_id] = vainqueur.user_id
@@ -4315,14 +4349,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         visuel.append("+2(Éveil)")
 
     # --- MISE À JOUR last_action_type + état Moine ---
-    prev_action = p.last_action_type  # Déjà persisté en DB, pas besoin de effets[]
-    p.last_action_type = "TC_attaque" if skill_data.get("cat") == "tronc" else "sous_classe"
-    # Moine : deux TC consécutives = Perturbé (sauf Éveil P5)
-    if "moine_lotus" in p.sous_classes_unlocked and p.concentre:
-        if "passif_lotus_eveil" not in p.competences:
-            if p.last_action_type == "TC_attaque" and prev_action == "TC_attaque":
-                p.concentre = 0
-                visuel.append("🔥(Perturbé!)")
+    msg_moine_transition = maj_etat_moine(p, skill_data, visuel)
 
     if p.race == "Drakéide" and p.niveau >= 3:
         total += (p.niveau // 3)
@@ -4376,6 +4403,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     if msg_sadisme: msg_v4 += msg_sadisme
     if msg_estoc_maitre: msg_v4 += msg_estoc_maitre
     if msg_regulateur: msg_v4 += msg_regulateur
+    if msg_moine_transition: msg_v4 += msg_moine_transition
     embed.description = f"**{p.nom}** attaque **{p_cible.nom}** !\n*« {description} »*{msg_hemo}{msg_festin}{msg_resonance}{msg_v4}{msg_bonus_manuel}{msg_singularite}"
     
     calcul_txt = f"Base {skill_obj.base} + ({heads}x{skill_obj.bonus}) + {stat_nom}"
