@@ -5963,27 +5963,33 @@ async def apprendre_autocomplete(interaction: discord.Interaction, current: str)
     
     choix = []
     for k, v in SKILLS_DB.items():
-        if k in p.competences: continue # Cache ce qu'on sait déjà
-        
-        # Récupère les classes sous forme de liste Python
-        classes_brutes = v.get('classes', [])
-        if isinstance(classes_brutes, str):
-            try: classes_list = json.loads(classes_brutes)
-            except (json.JSONDecodeError, TypeError): classes_list = []
-        else:
-            classes_list = classes_brutes
+        if k in p.competences: continue  # déjà connu
 
-        # Masque les spés non débloquées
-        if v.get('cat') == 'spe':
+        cat = v.get('cat', 'tronc')
+        classes_list = v.get('classes', [])
+        if isinstance(classes_list, str):
+            try: classes_list = json.loads(classes_list)
+            except: classes_list = []
+
+        if cat == 'spe':
+            # Visible seulement si la sous-classe est débloquée
             if not any(sc in p.sous_classes_unlocked for sc in classes_list):
                 continue
-        
-        # Filtre par classe pour le Tronc Commun
-        if v.get('cat') == 'tronc' and p.classe not in classes_list:
+        elif cat == 'tronc':
+            # Visible seulement si la classe correspond
+            if p.classe not in classes_list:
+                continue
+        elif cat == 'monstre':
+            # Sorts freestyle : jamais achetables via /apprendre (donnés par GM)
             continue
+        # autres cats (ex: spe custom) : affichés si sous-classe débloquée
+        else:
+            if classes_list and not any(sc in p.sous_classes_unlocked for sc in classes_list):
+                continue
 
         if current.lower() in v['nom'].lower():
-            choix.append(app_commands.Choice(name=f"[{v['pallier']}] {v['nom']}", value=k))
+            choix.append(app_commands.Choice(name=f"[P{v['pallier']}] {v['nom']}", value=k))
+
     return choix[:25]
 
 
@@ -6545,12 +6551,15 @@ async def apprendre(interaction: discord.Interaction, competence: str):
     
     # A. Vérification de l'accès à la classe / sous-classe
     if cat == "spe":
-        nom_arbre = skill['classes'][0] 
+        classes_spe = skill.get('classes', [])
+        if not classes_spe:
+            return await interaction.response.send_message("❌ Sort sans classe définie.", ephemeral=True)
+        nom_arbre = classes_spe[0]
         if nom_arbre not in p.sous_classes_unlocked:
             return await interaction.response.send_message(f"🔒 Arbre **{nom_arbre.capitalize()}** verrouillé. Utilisez `/debloquer_specialisation`.", ephemeral=True)
     elif cat == "tronc":
-        if p.classe not in skill['classes']:
-             return await interaction.response.send_message(f"🚫 Réservé aux {skill['classes'][0]}.", ephemeral=True)
+        if p.classe not in skill.get('classes', []):
+             return await interaction.response.send_message(f"🚫 Réservé aux {skill.get('classes', ['?'])[0]}.", ephemeral=True)
 
     # B. Règle de la Pyramide Unifiée (Mélange Tronc + Spé)
     if pallier_vise > 1:
