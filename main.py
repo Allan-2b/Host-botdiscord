@@ -328,8 +328,8 @@ def get_bonus_resonance(p) -> dict:
 
 
 def get_nb_alterations(cible: 'Personnage') -> int:
-    """Retourne le nombre d'altérations d'état actives sur la cible (Sadisme Tactique)."""
-    alts = {"poison", "brulure", "hemorragie", "stun", "root", "gel", "corruption", "mutilation"}
+    """Retourne le nombre de types d'altérations d'état actives sur la cible."""
+    alts = {"poison", "brulure", "hemorragie", "stun", "root", "gel", "corruption", "mutilation", "toxine"}
     return sum(1 for k in cible.effets if k in alts)
 
 def get_lestage(cible: 'Personnage') -> int:
@@ -802,20 +802,43 @@ def populate_spells():
         # ====================================================================================
         # ASSASSIN DE LA CONFRÉRIE — Sous-classe Guerrier
         # ====================================================================================
-        # --- PASSIFS ---
-        ("passif_assassin_sadisme","[Sadisme Tactique] (Passif)", '["assassin_confrerie"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "+4/+8/+12 dégâts selon nombre d\'altérations sur la cible.", "passif", "spe", '{"passif": "assassin_sadisme"}'),
-        ("passif_assassin_traque", "[Traque Silencieuse] (Passif)",'["assassin_confrerie"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Cible Désignée ou avec 2+ altérations : ignore Robustesse.", "passif", "spe", '{"passif": "assassin_traque"}'),
-        ("passif_assassin_sang",   "[Sang-Froid] (Passif)",       '["assassin_confrerie"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "+1 Tension par altération active sur la cible (max +4).", "passif", "spe", '{"passif": "assassin_sang"}'),
-        ("passif_assassin_expert", "[Expert en Souffrance] (Passif)",'["assassin_confrerie"]',4, 4, 0,0,0,"phy",0,"tension",0,0, "Chaque attaque TC sur cible avec altérations : +1 durée sur toutes ses altérations.", "passif", "spe", '{"passif": "assassin_expert"}'),
-        ("passif_assassin_heure",  "[L'Heure du Crime] (Passif)",   '["assassin_confrerie"]',4, 4, 0,0,0,"phy",0,"tension",0,0, "Sorts TC sur cible empoisonnée : ignore Armure + Robustesse.", "passif", "spe", '{"passif": "assassin_heure"}'),
-        ("passif_assassin_exe",    "[Exécution Chirurgicale] (Passif)",'["assassin_confrerie"]',5,5,0,0,0,"phy",0,"tension",0,0,"Cible ≤25% PV avec 3+ altérations : exécution automatique.", "passif", "spe", '{"passif": "assassin_exe"}'),
-        # --- ACTIFS ---
-        ("assassin_frappe_nov",   "Frappe Empoisonnée Novice",    '["assassin_confrerie"]', 1, 1, 5, 3, 2, "phy", 2, "tension", 0, 2, "Attaque rapide infligeant Poison.", "actif", "spe", '{"seuil": 2, "status": {"poison": 2}}'),
-        ("assassin_laceration",   "Lacération",                   '["assassin_confrerie"]', 2, 2, 6, 4, 2, "phy", 3, "tension", 0, 2, "Déchire chair et moral. Hémorragie + Poison.", "actif", "spe", '{"seuil": 2, "status": {"hemorragie": 2, "poison": 1}}'),
-        ("assassin_venin_avance",  "Venin Avancé",                '["assassin_confrerie"]', 3, 3, 8, 4, 3, "phy", 4, "tension", 0, 3, "Poison puissant doublant ses effets.", "actif", "spe", '{"seuil": 2, "status": {"poison": 3}, "double_dot_si_poison": true}'),
-        ("assassin_torture",       "Torture Méthodique",          '["assassin_confrerie"]', 4, 4, 9, 5, 3, "phy", 5, "tension", 0, 3, "Inflige Brûlure + Poison + Hémorragie simultanément.", "actif", "spe", '{"seuil": 3, "status": {"brulure": 2, "poison": 2, "hemorragie": 2}}'),
-        ("assassin_mise_a_mort",   "Mise à Mort",                 '["assassin_confrerie"]', 5, 5, 14, 6, 5, "phy", 6, "tension", 0, 4, "Frappe finale. Si cible 3+ altérations : ignore toute défense.", "actif", "spe", '{"seuil": 4, "ignore_armor_si_3alt": true, "ignore_rob_si_3alt": true}'),
-
+        # ── ASSASSIN DE LA CONFRÉRIE ─────────────────────────────────────
+        # PASSIFS
+        ("passif_assassin_lame",    "[Lame Infectée] (Passif)",        '["assassin_confrerie"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "25% de chance d'infliger Poison 1 ou Hémorragie 1 à chaque attaque (au choix).", "passif", "spe", '{"passif": "assassin_lame"}'),
+        ("passif_assassin_neuro",   "[Neurotoxine] (Passif)",          '["assassin_confrerie"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Cible sous Toxine : ne peut pas utiliser d'action Bonus ce tour.", "passif", "spe", '{"passif": "assassin_neuro"}'),
+        ("passif_assassin_bourreau","[Bourreau des Ombres] (Passif)",  '["assassin_confrerie"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "Sort TC sur cible avec 3+ types d'altérations : coût en Tension réduit à 0.", "passif", "spe", '{"passif": "assassin_bourreau"}'),
+        ("passif_assassin_heure",   "[L'Heure du Crime] (Passif)",     '["assassin_confrerie"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "Sorts TC ignorent Robustesse ET Armure de toute cible souffrant d'au moins 1 Poison.", "passif", "spe", '{"passif": "assassin_heure"}'),
+        ("passif_assassin_ange",    "[L'Ange Noir] (Passif)",          '["assassin_confrerie"]', 5, 5, 0,0,0,"phy",0,"tension",0,0, "Tuer un ennemi avec 3+ altérations : +5 Tension et +15 PV.", "passif", "spe", '{"passif": "assassin_ange"}'),
+        # PALLIER 1
+        ("assassin_coup_vic_nov",   "Coup Vicieux Novice",             '["assassin_confrerie"]', 1, 1, 6, 3, 2, "phy", 1, "tension", 0, 0, "Frappe précise sur plaie ouverte. Ignore Armure si cible a Hémorragie.", "actif", "spe", '{"seuil": 2, "ignore_armor_si_hemo": true}'),
+        ("assassin_dague_nov",      "Dague Toxique Novice",            '["assassin_confrerie"]', 1, 1, 5, 3, 2, "phy", 1, "tension", 0, 1, "Lame empoisonnée. Inflige 1 Toxine (-1 Pièce ennemi prochain tour).", "actif", "spe", '{"seuil": 2, "status": {"toxine": 1}}'),
+        ("assassin_bombe_nov",      "Bombe Fumigène Novice (Bonus)",   '["assassin_confrerie"]', 1, 1, 0, 3, 2, "phy", 1, "tension", 0, 2, "Disparaît dans un nuage. Bouclier 9 + Furtif Assassin (+1 Pièce prochain sort).", "defense", "spe", '{"seuil": 1, "armure_base": 9, "self_status": {"furtif_assassin": 1}}'),
+        ("assassin_velours",        "Pas de Velours (Bonus)",          '["assassin_confrerie"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 0, "RP — Déplacement totalement silencieux.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Se déplacer ou s\'infiltrer sans produire le moindre son."}'),
+        ("assassin_analyse",        "Analyse des Failles (Bonus)",     '["assassin_confrerie"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 1, "RP — Révèle la pire statistique de l\'ennemi.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Révèle immédiatement la pire statistique de l\'ennemi."}'),
+        # PALLIER 2
+        ("assassin_frappe_art_nov", "Frappe Artérielle Novice",        '["assassin_confrerie"]', 2, 2, 7, 3, 2, "phy", 2, "tension", 0, 2, "Vise les zones vitales. Inflige 2 Hémorragies.", "actif", "spe", '{"seuil": 2, "status": {"hemorragie": 2}}'),
+        ("assassin_couteaux_nov",   "Lancer de Couteaux Novice",       '["assassin_confrerie"]', 2, 2, 6, 4, 2, "phy", 2, "tension", 0, 1, "Projette des lames de précision. Touche 2 ennemis, 1 Poison chacun.", "actif", "spe", '{"seuil": 2, "status": {"poison": 1}, "ricochet": true}'),
+        ("assassin_fausse_id",      "Fausse Identité (Bonus)",         '["assassin_confrerie"]', 2, 2, 0, 2, 0, "phy", 0, "tension", 0, 0, "RP — Se déguiser parfaitement en un PNJ spécifique.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Se déguiser parfaitement en un PNJ spécifique."}'),
+        ("assassin_crochet",        "Crochetage Expert (Bonus)",       '["assassin_confrerie"]', 2, 2, 0, 2, 0, "phy", 0, "tension", 0, 1, "RP — Ouvre toute serrure non-magique sans bruit.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Ouvre instantanément et sans bruit toute serrure, chaîne ou coffre non-magique."}'),
+        ("assassin_somnifere",      "Somnifère Aérien (Bonus)",        '["assassin_confrerie"]', 2, 2, 0, 2, 0, "phy", 0, "tension", 0, 1, "RP — Endort un PNJ non-combattant 1 heure.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Endort instantanément un PNJ non-combattant pendant une heure."}'),
+        # PALLIER 3
+        ("assassin_coup_vic",       "Coup Vicieux",                    '["assassin_confrerie"]', 3, 3, 9, 3, 3, "phy", 3, "tension", 0, 0, "Déchire les chairs. 2 Hémorragies + Mutilation.", "actif", "spe", '{"seuil": 2, "status": {"hemorragie": 2, "mutilation": 1}}'),
+        ("assassin_dague",          "Dague Toxique",                   '["assassin_confrerie"]', 3, 3, 7, 4, 3, "phy", 3, "tension", 0, 1, "Venin concentré. 2 Toxines + Silence (magie impossible ce tour).", "actif", "spe", '{"seuil": 3, "status": {"toxine": 2}, "silence_cible": true}'),
+        ("assassin_bombe",          "Bombe Fumigène (Bonus)",          '["assassin_confrerie"]', 3, 3, 0, 4, 3, "phy", 2, "tension", 0, 2, "Bouclier 13 + toute l\'équipe devient Furtive pour le prochain tour.", "defense", "spe", '{"seuil": 2, "armure_base": 13, "self_status": {"furtif_assassin": 1}, "aoe_furtif_assassin": true}'),
+        ("assassin_voix",           "Voix de l'Ombre (Bonus)",        '["assassin_confrerie"]', 3, 3, 0, 3, 0, "phy", 0, "tension", 0, 1, "RP — Imite parfaitement la voix d\'un PNJ entendu.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Imite à la perfection la voix d\'un PNJ entendu au moins une fois."}'),
+        ("assassin_poison_pers",    "Poison Persistant (Bonus)",       '["assassin_confrerie"]', 3, 3, 0, 3, 0, "phy", 0, "tension", 0, 1, "RP — Empoisonne un plat indétectablement.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Empoisonne indétectablement un plat ou une boisson (mortel pour un PNJ mineur après quelques heures)."}'),
+        # PALLIER 4
+        ("assassin_frappe_art",     "Frappe Artérielle",               '["assassin_confrerie"]', 4, 4, 11, 4, 3, "phy", 4, "tension", 0, 2, "Hémorragie inarrêtable. 3 Hémorragies + 5 PV perdus à chaque action.", "actif", "spe", '{"seuil": 3, "status": {"hemorragie": 3}, "dmg_par_action": 5}'),
+        ("assassin_couteaux",       "Lancer de Couteaux",              '["assassin_confrerie"]', 4, 4, 9, 5, 3, "phy", 4, "tension", 0, 1, "Zone. 1 Poison + 1 Toxine à tous les ennemis.", "actif", "spe", '{"seuil": 3, "status": {"poison": 1, "toxine": 1}, "aoe": true}'),
+        ("assassin_marque_peur",    "Marque de Peur (Bonus)",          '["assassin_confrerie"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 1, "RP — Symbole gravé : quiconque le voit obéit aux menaces.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Gravez un symbole. Quiconque le voit obéit à vos menaces sans combattre."}'),
+        ("assassin_poudre_amn",     "Poudre d'Amnésie (Bonus)",       '["assassin_confrerie"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 1, "RP — Efface 10 minutes de mémoire d\'un PNJ.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Efface les 10 dernières minutes de mémoire d\'un PNJ."}'),
+        ("assassin_langage",        "Langage Silencieux (Bonus)",      '["assassin_confrerie"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 1, "RP — Communication par signes imperceptibles.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Communique par signes ou messages codés imperceptibles aux non-initiés."}'),
+        # PALLIER 5
+        ("assassin_coup_vic_av",    "Coup Vicieux Avancé",             '["assassin_confrerie"]', 5, 5, 16, 4, 4, "phy", 5, "tension", 0, 0, "Exécution chirurgicale. Exécute si cible < 20% PV après l\'attaque.", "actif", "spe", '{"seuil": 3, "execute_sous_20pct": true}'),
+        ("assassin_dague_av",       "Dague Toxique Avancée",           '["assassin_confrerie"]', 5, 5, 13, 5, 4, "phy", 5, "tension", 0, 1, "Toxine du Cauchemar. Inflige 4 Toxines.", "actif", "spe", '{"seuil": 4, "status": {"toxine": 4}}'),
+        ("assassin_bombe_av",       "Bombe Fumigène Avancée (Bonus)",  '["assassin_confrerie"]', 5, 5, 0, 5, 4, "phy", 4, "tension", 0, 3, "Invulnérabilité à toute l\'équipe ce tour.", "defense", "spe", '{"seuil": 3, "self_status": {"invulnerable": 1}, "aoe_invulnerable": true}'),
+        ("assassin_ecoute",         "Écoute Ténébreuse (Bonus)",       '["assassin_confrerie"]', 5, 5, 0, 4, 0, "phy", 0, "tension", 0, 2, "RP — Entend à travers les murs via les ombres.", "utilitaire", "spe", '{"seuil": 2, "rp_effect": "Entend parfaitement à travers les murs en utilisant les ombres comme catalyseur."}'),
+        ("assassin_contrat",        "Contrat Absolu (Bonus)",          '["assassin_confrerie"]', 5, 5, 0, 6, 0, "phy", 0, "tension", 0, 5, "RP Ultime — Fait assassiner un PNJ mineur à distance en 24h.", "utilitaire", "spe", '{"seuil": 4, "rp_effect": "Fait assassiner un PNJ mineur ou non-combattant à distance dans les 24h sans laisser de trace."}'),
         # ====================================================================================
         # ÉCOLE DE L'ESTOC — Sous-classe Guerrier
         # ====================================================================================
@@ -2703,6 +2726,8 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible d'agir.", ephemeral=True)
     if "no_bonus_action" in p.effets:
         return await interaction.followup.send("🎯 **Paralysie Neurale** : Vous ne pouvez pas utiliser d'Action Bonus ce tour !", ephemeral=True)
+    if "toxine" in p.effets:
+        return await interaction.followup.send("🧪 **Neurotoxine** : La Toxine vous empêche d'utiliser une Action Bonus ce tour !", ephemeral=True)
 
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
@@ -2757,6 +2782,16 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     if "titanenblut" in p.effets:
         skill_obj.coins += 1
         cout_msg += " 🩸(Titan)"
+
+    if "toxine" in p.effets:
+        stacks_toxine = p.effets["toxine"].get("valeur", 1)
+        skill_obj.coins = max(1, skill_obj.coins - stacks_toxine)
+        cout_msg += f" 🧪(-{stacks_toxine}🪙)"
+
+    if "furtif_assassin" in p.effets:
+        skill_obj.coins += 1
+        del p.effets["furtif_assassin"]
+        cout_msg += " 🌑(+1🪙 Furtif)"
 
     fp_ab = bool(p.effets.get("force_pile"))
     if fp_ab:
@@ -2967,7 +3002,7 @@ async def tour(interaction: discord.Interaction,
         CONFIG_EFFETS = {
             "brulure": "🔥", "poison": "☠️", "hemorragie": "🩸",
             "gel": "❄️", "stun": "💫", "root": "🌳",
-            "hate": "⚡", "corruption": "🌑"
+            "hate": "⚡", "corruption": "🌑", "toxine": "🧪", "silence": "🤫", "furtif_assassin": "🌑"
         }
 
         if p.effets:
@@ -3022,6 +3057,17 @@ async def tour(interaction: discord.Interaction,
                     
                     msg_corr = f"{ico} **Corruption** : {perte_msg}" if perte_msg else f"{ico} **Corruption** : Ressources drainées."
                     rapport_effets.append(msg_corr)
+
+                elif code == "toxine":
+                    # Toxine : réduit les Pièces de l'ennemi de -1 ce tour (géré à l'attaque via effets)
+                    stacks = data.get("valeur", 1)
+                    rapport_effets.append(f"🧪 **Toxine** ({stacks} stack(s)) : -{stacks} Pièce(s) sur votre prochain sort !")
+
+                elif code == "silence":
+                    rapport_effets.append("🤫 **Silence** : Magie impossible ce tour !")
+
+                elif code == "furtif_assassin":
+                    rapport_effets.append("🌑 **Furtif** : +1 Pièce sur votre prochain sort de la Confrérie !")
 
                 elif code == "root":
                      agi_effective = 0 
@@ -3503,6 +3549,16 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
     if "titanenblut" in p_attaquant.effets:
         skill_obj.coins += 1
         cout_msg += "(Titaneblut)"
+
+    if "toxine" in p_attaquant.effets:
+        stacks_toxine = p_attaquant.effets["toxine"].get("valeur", 1)
+        skill_obj.coins = max(1, skill_obj.coins - stacks_toxine)
+        cout_msg += f" 🧪(-{stacks_toxine}🪙 Toxine)"
+
+    if "furtif_assassin" in p_attaquant.effets:
+        skill_obj.coins += 1
+        del p_attaquant.effets["furtif_assassin"]
+        cout_msg += " 🌑(+1🪙 Furtif)"
 
     # --- LOGE DE L'OMBRE : bonus_si_deja_designee (Marquage Avancé P2) ---
     _flag_ma_clash = p_attaquant.effets.pop("_bonus_marquage_avance", None)
@@ -4130,6 +4186,18 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     if "titanenblut" in p.effets:
         skill_obj.coins += 1
 
+    # --- TOXINE (Assassin Confrérie) : -1 Pièce par stack sur l'attaquant ---
+    if "toxine" in p.effets:
+        stacks_toxine = p.effets["toxine"].get("valeur", 1)
+        skill_obj.coins = max(1, skill_obj.coins - stacks_toxine)
+        visuel.append(f"🧪(-{stacks_toxine}🪙 Toxine)")
+
+    # --- FURTIF ASSASSIN : +1 Pièce sur le prochain sort ---
+    if "furtif_assassin" in p.effets:
+        skill_obj.coins += 1
+        del p.effets["furtif_assassin"]
+        visuel.append("🌑(+1🪙 Furtif)")
+
     # --- LOGE DE L'OMBRE : bonus_si_deja_designee (Marquage Avancé P2) ---
     _flag_ma = p.effets.pop("_bonus_marquage_avance", None)
     if _flag_ma:
@@ -4230,50 +4298,72 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
             msg_festin = f"\n🩸 **Festin Stade 1** : +3 Dégâts."
             visuel.append("🩸+3(Stade1)")
 
-    # --- SADISME TACTIQUE (Assassin de la Confrérie P1) — TC uniquement ---
+    # --- ASSASSIN DE LA CONFRÉRIE — Passifs sur sorts TC ---
     msg_sadisme = ""
     _is_tc = skill_data.get("cat") == "tronc"
-    if "assassin_confrerie" in p.sous_classes_unlocked and _is_tc:
+    if "assassin_confrerie" in p.sous_classes_unlocked and p_cible:
         nb_alts = get_nb_alterations(p_cible)
-        if "passif_assassin_sadisme" in p.competences:
+
+        # SADISME (mécanique signature) — TC uniquement
+        if _is_tc:
             if nb_alts >= 3:
-                total += 12; msg_sadisme = f"\n🗡️ **Sadisme Tactique** : +12 dégâts ({nb_alts} altérations) !"
+                total += 12
+                msg_sadisme += f"\n🗡️ **Sadisme** : +12 dégâts ({nb_alts} types d'altérations) ! *(Attaque Inesquivable)*"
+                p._inesquivable = True
             elif nb_alts == 2:
-                total += 8;  msg_sadisme = f"\n🗡️ **Sadisme Tactique** : +8 dégâts ({nb_alts} altérations) !"
+                total += 8
+                msg_sadisme += f"\n🗡️ **Sadisme** : +8 dégâts ({nb_alts} altérations)."
             elif nb_alts == 1:
-                total += 4;  msg_sadisme = f"\n🗡️ **Sadisme Tactique** : +4 dégâts ({nb_alts} altération) !"
-        # Traque Silencieuse (P2) : ignore Rob si cible a 2+ altérations — TC uniquement
-        if "passif_assassin_traque" in p.competences:
-            if get_nb_alterations(p_cible) >= 2:
-                p._ignore_rob = True
-                msg_sadisme += "\n🗡️ **Traque Silencieuse** : Robustesse ignorée (2+ altérations)."
-        # Sang-Froid (P3) : +1 Tension par altération (max +4) — TC uniquement
-        if "passif_assassin_sang" in p.competences:
-            gain_t = min(get_nb_alterations(p_cible), 4)
-            if gain_t > 0:
-                p.tension = min(p.tension + gain_t, 20)
-                msg_sadisme += f"\n🗡️ **Sang-Froid** : +{gain_t} Tension."
-        # Expert en Souffrance (P4) : +1 durée sur toutes les altérations — TC uniquement
-        if "passif_assassin_expert" in p.competences:
-            alts_set = {"poison", "brulure", "hemorragie", "stun", "root", "gel", "corruption", "mutilation"}
-            prolonged = []
-            for k in list(p_cible.effets.keys()):
-                if k in alts_set:
-                    p_cible.effets[k]["duree"] = p_cible.effets[k].get("duree", 1) + 1
-                    prolonged.append(k)
-            if prolonged:
-                msg_sadisme += f"\n🗡️ **Expert en Souffrance** : +1 durée ({', '.join(prolonged)})."
-        # L'Heure du Crime (P4) : TC sur cible empoisonnée → ignore Armure + Rob
-        if "passif_assassin_heure" in p.competences and "poison" in p_cible.effets:
+                total += 4
+                msg_sadisme += f"\n🗡️ **Sadisme** : +4 dégâts (1 altération)."
+
+        # Lame Infectée (P1) — toujours, 25% chance Poison ou Hémo
+        if "passif_assassin_lame" in p.competences and total > 0:
+            import random as _r
+            if _r.random() < 0.25:
+                p_cible.ajouter_effet("poison", 1)
+                msg_sadisme += "\n🗡️ **Lame Infectée** : Poison 1 déclenché (25%) !"
+
+        # Bourreau des Ombres (P3) — TC avec 3+ altérations → coût Tension = 0
+        if _is_tc and "passif_assassin_bourreau" in p.competences and nb_alts >= 3:
+            remboursement = skill_data.get("cout", 0)
+            if skill_data.get("cout_type") == "tension" and remboursement > 0:
+                p.tension = min(p.tension + remboursement, 20)
+                msg_sadisme += f"\n🗡️ **Bourreau des Ombres** : Coût en Tension remboursé (+{remboursement})."
+
+        # L'Heure du Crime (P4) — TC sur cible empoisonnée → ignore Armure + Rob
+        if _is_tc and "passif_assassin_heure" in p.competences and "poison" in p_cible.effets:
             p._ignore_armor = True
             p._ignore_rob   = True
             msg_sadisme += "\n🗡️ **L'Heure du Crime** : Armure + Robustesse ignorées (cible empoisonnée)."
-    # Exécution Chirurgicale (P5) : tous sorts — cible ≤25% PV avec 3+ altérations
-    if "assassin_confrerie" in p.sous_classes_unlocked and "passif_assassin_exe" in p.competences:
-        seuil_exe = p_cible.pv_max * 0.25
-        if p_cible.pv_actuel <= seuil_exe and get_nb_alterations(p_cible) >= 3:
-            p_cible.pv_actuel = 0
-            msg_sadisme += f"\n💀 **Exécution Chirurgicale** : {p_cible.nom} est exécuté(e) !"
+
+        # ignore_armor_si_hemo (Coup Vicieux Novice)
+        _data_spe = {}
+        try:
+            import json as _j
+            _data_spe = _j.loads(skill_data.get("data_json", "{}"))
+        except Exception: pass
+        if _data_spe.get("ignore_armor_si_hemo") and "hemorragie" in p_cible.effets:
+            p._ignore_armor = True
+            msg_sadisme += "\n🗡️ **Coup Vicieux** : Armure ignorée (cible en Hémorragie)."
+
+        # Silence (Dague Toxique P3) — magie impossible ce tour
+        if _data_spe.get("silence_cible"):
+            p_cible.ajouter_effet("silence", 1)
+            msg_sadisme += "\n🤫 **Silence** : magie impossible pour la cible ce tour."
+
+        # execute_sous_20pct (Coup Vicieux Avancé P5)
+        if _data_spe.get("execute_sous_20pct"):
+            seuil_20 = p_cible.pv_max * 0.20
+            if p_cible.pv_actuel <= seuil_20:
+                p_cible.pv_actuel = 0
+                msg_sadisme += f"\n💀 **Exécution** : {p_cible.nom} est exécuté(e) (< 20% PV) !"
+
+        # L'Ange Noir (P5) — kill avec 3+ altérations
+        if "passif_assassin_ange" in p.competences and p_cible.pv_actuel <= 0 and nb_alts >= 3:
+            p.tension = min(p.tension + 5, 20)
+            p.pv_actuel = min(p.pv_max, p.pv_actuel + 15)
+            msg_sadisme += "\n🖤 **L'Ange Noir** : Kill avec 3+ altérations ! +5 Tension, +15 PV."
 
     # --- RÉSONANCE ÉLÉMENTAIRE : Bonus Dégâts Feu ---
     msg_resonance = ""
