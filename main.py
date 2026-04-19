@@ -5965,13 +5965,21 @@ async def apprendre_autocomplete(interaction: discord.Interaction, current: str)
     for k, v in SKILLS_DB.items():
         if k in p.competences: continue # Cache ce qu'on sait déjà
         
+        # Récupère les classes sous forme de liste Python
+        classes_brutes = v.get('classes', [])
+        if isinstance(classes_brutes, str):
+            try: classes_list = json.loads(classes_brutes)
+            except (json.JSONDecodeError, TypeError): classes_list = []
+        else:
+            classes_list = classes_brutes
+
         # Masque les spés non débloquées
         if v.get('cat') == 'spe':
-            if not any(sc in p.sous_classes_unlocked for sc in v['classes']):
+            if not any(sc in p.sous_classes_unlocked for sc in classes_list):
                 continue
         
         # Filtre par classe pour le Tronc Commun
-        if v.get('cat') == 'tronc' and p.classe not in v['classes']:
+        if v.get('cat') == 'tronc' and p.classe not in classes_list:
             continue
 
         if current.lower() in v['nom'].lower():
