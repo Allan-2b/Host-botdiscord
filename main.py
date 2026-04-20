@@ -1482,8 +1482,8 @@ async def sort_offensif_autocomplete(interaction: discord.Interaction, current: 
     choix = []
     for key, val in SKILLS_DB.items():
         if val.get('type') != 'actif': continue
-        if not is_gm_user and val.get('cat') == 'monstre': continue
-        if not is_gm_user and p and key not in p.competences: continue
+        if not is_gm_user and val.get('cat') == 'monstre' and (not p or key not in p.competences): continue
+        if not is_gm_user and val.get('cat') != 'monstre' and p and key not in p.competences: continue
         if current.lower() in val['nom'].lower():
             nom_aff = f"👹 {val['nom']}" if val.get('cat')=='monstre' else val['nom']
             choix.append(app_commands.Choice(name=nom_aff, value=key))
