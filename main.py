@@ -1500,10 +1500,12 @@ async def action_bonus_autocomplete(interaction: discord.Interaction, current: s
     
     choix = []
     for key, val in SKILLS_DB.items():
-        # Filtre 1 : On ne garde QUE les sorts qui sont des actions bonus
-        if "(BONUS)" not in val['nom'].upper(): continue
+        # Filtre 1 : sorts bonus = "(BONUS)" dans le nom OU type utilitaire avec cat monstre (freestyle bonus)
+        is_bonus_nom = "(BONUS)" in val['nom'].upper()
+        is_freestyle_bonus = val.get('cat') == 'monstre' and val.get('type') == 'utilitaire'
+        if not is_bonus_nom and not is_freestyle_bonus: continue
         
-        # Filtre 2 : On ne montre QUE les sorts que le personnage possède (MJ ou non)
+        # Filtre 2 : On ne montre QUE les sorts que le personnage possède
         if key not in p.competences: continue
         
         if current.lower() in val['nom'].lower():
@@ -6875,7 +6877,8 @@ async def gm_add_boss_skill(interaction: discord.Interaction, nom: str, descript
     effet_val="Puissance de l'effet (ex: 2 pour Brûlure 2)",
     zone="L'attaque touche-t-elle plusieurs personnes (AoE) ?",
     cooldown_tours="Cooldown en tours de combat (0 = aucun)",
-    cible_fiche="[Optionnel] Donner le sort à une fiche spécifique (sinon : votre personnage actif)"
+    cible_fiche="[Optionnel] Donner le sort à une fiche spécifique (sinon : votre personnage actif)",
+    type_sort="Type du sort : Actif (attaque) ou Bonus (action bonus, utilitaire)"
 )
 @app_commands.choices(stat=[
     app_commands.Choice(name="Physique", value="phy"),
@@ -6890,6 +6893,9 @@ async def gm_add_boss_skill(interaction: discord.Interaction, nom: str, descript
     app_commands.Choice(name="💫 Étourdissement", value="stun"),
     app_commands.Choice(name="🌳 Enracinement", value="root"),
     app_commands.Choice(name="🦴 Mutilation", value="mutilation")
+], type_sort=[
+    app_commands.Choice(name="⚔️ Actif (apparaît dans /attaque et /clash)", value="actif"),
+    app_commands.Choice(name="⚡ Bonus (apparaît dans /action_bonus)", value="bonus"),
 ])
 @app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
 async def gm_freestyle(
@@ -6897,7 +6903,7 @@ async def gm_freestyle(
     nom: str, description: str, base: int, pieces: int, bonus: int, 
     stat: app_commands.Choice[str], 
     effet_type: app_commands.Choice[str] = None, effet_val: int = 1, zone: bool = False, cooldown_tours: int = 0,
-    cible_fiche: str = None
+    cible_fiche: str = None, type_sort: app_commands.Choice[str] = None
 ):
     if not is_gm(interaction.user.id): return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
@@ -6910,6 +6916,12 @@ async def gm_freestyle(
         p_cible = Personnage.charger(interaction.user.id)
         if not p_cible:
             return await interaction.response.send_message("❌ Incarnez d'abord un personnage avec /gm_spawn, ou précisez une cible_fiche.", ephemeral=True)
+
+    # Déterminer le type et le nom affiché
+    is_bonus = type_sort and type_sort.value == "bonus"
+    sort_type = "utilitaire" if is_bonus else "actif"
+    # Les sorts bonus doivent avoir "(Bonus)" dans le nom pour apparaître dans /action_bonus
+    nom_final = nom if not is_bonus else (nom if "(Bonus)" in nom or "(BONUS)" in nom else f"{nom} (Bonus)")
 
     # 1. Générer une ID unique
     unique_id = f"free_{int(time.time())}"
@@ -6933,10 +6945,10 @@ async def gm_freestyle(
         (ref, nom, classes, pallier, cout_achat, base, coins, bonus, stat_type, cout, cout_type, cooldown, desc, type, cat, data_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        unique_id, nom, '["monstre"]', 1, 0, 
+        unique_id, nom_final, '["monstre"]', 1, 0, 
         base, pieces, bonus, stat_code, 0, "mana",
         cooldown_tours,
-        description, "actif", "monstre", json_str
+        description, sort_type, "monstre", json_str
     ))
     conn.commit()
     conn.close()
@@ -6950,8 +6962,12 @@ async def gm_freestyle(
         p_cible.sauvegarder()
 
     # 5. Affichage
-    embed = discord.Embed(title="⚡ Compétence Créée & Équipée !", color=0xE67E22)
-    embed.description = f"**{p_cible.nom}** a appris l'attaque **{nom}**.\n*Elle est désormais dans l'autocomplétion de `/clash` et `/attaque`.*"
+    if is_bonus:
+        embed = discord.Embed(title="⚡ Sort Bonus Créé & Équipé !", color=0x00FFFF)
+        embed.description = f"**{p_cible.nom}** a appris **{nom_final}**.\n*Disponible dans `/action_bonus`.*"
+    else:
+        embed = discord.Embed(title="⚡ Compétence Créée & Équipée !", color=0xE67E22)
+        embed.description = f"**{p_cible.nom}** a appris l'attaque **{nom_final}**.\n*Elle est désormais dans l'autocomplétion de `/clash` et `/attaque`.*"
     
     details = f"🎲 **Formule :** Base {base} + ({pieces}x{bonus}) + {stat.name}\n"
     if effet_type: 
@@ -6960,6 +6976,7 @@ async def gm_freestyle(
         details += "💥 **Zone :** Touche plusieurs cibles\n"
     if cooldown_tours > 0:
         details += f"⏳ **Cooldown :** {cooldown_tours} tours\n"
+    details += f"📋 **Type :** {'⚡ Bonus (action_bonus)' if is_bonus else '⚔️ Actif (attaque/clash)'}"
     embed.add_field(name="Paramètres", value=details, inline=False)
     embed.add_field(name="Narration", value=f"*{description}*", inline=False)
     
