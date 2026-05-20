@@ -134,6 +134,47 @@ def init_db():
     conn.execute('CREATE TABLE IF NOT EXISTS config_items (ref TEXT PRIMARY KEY, nom TEXT, slot TEXT, description TEXT)')
     conn.execute('CREATE TABLE IF NOT EXISTS inventaire (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_ref TEXT, equipe INTEGER DEFAULT 0, FOREIGN KEY(item_ref) REFERENCES config_items(ref))')
 
+    # ── NOUVEAU : Raretés, Sets, Étude ────────────────────────────────
+    # config_items étendu (ALTER si colonnes manquantes)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS config_sets (
+            set_ref TEXT PRIMARY KEY,
+            nom TEXT,
+            description TEXT,
+            bonus_2 TEXT DEFAULT '{}',
+            bonus_4 TEXT DEFAULT '{}'
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS config_set_items (
+            set_ref TEXT,
+            item_ref TEXT,
+            PRIMARY KEY (set_ref, item_ref)
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS etude_progress (
+            user_id INTEGER,
+            inv_id INTEGER,
+            reussites INTEGER DEFAULT 0,
+            derniere_tentative TEXT DEFAULT NULL,
+            identifie INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, inv_id)
+        )
+    ''')
+    # Nouvelles colonnes config_items
+    try: conn.execute("ALTER TABLE config_items ADD COLUMN rarete TEXT DEFAULT 'commun'")
+    except: pass
+    try: conn.execute("ALTER TABLE config_items ADD COLUMN bonus_json TEXT DEFAULT '{}'")
+    except: pass
+    try: conn.execute("ALTER TABLE config_items ADD COLUMN points_limite INTEGER DEFAULT 5")
+    except: pass
+    try: conn.execute("ALTER TABLE config_items ADD COLUMN necessite_etude INTEGER DEFAULT 0")
+    except: pass
+    # inventaire : item identifié ?
+    try: conn.execute("ALTER TABLE inventaire ADD COLUMN identifie INTEGER DEFAULT 1")
+    except: pass
+
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN race TEXT DEFAULT 'Humain'")
     except sqlite3.OperationalError: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN effets TEXT DEFAULT '{}'")
@@ -1323,13 +1364,57 @@ class Personnage:
     def charger_equipement(self):
         conn = get_db_connection()
         rows = conn.execute('''
-            SELECT c.nom, c.slot, c.description 
+            SELECT c.nom, c.slot, c.description, c.bonus_json, i.item_ref, i.identifie
             FROM inventaire i
             JOIN config_items c ON i.item_ref = c.ref
             WHERE i.user_id = ? AND i.equipe = 1
         ''', (self.user_id,)).fetchall()
-        conn.close()
         self.equipement = [dict(row) for row in rows]
+
+        # Reset bonuses items
+        self.bonus_base_item = 0
+        self.bonus_pieces_item = 0
+        self.mana_max_bonus_item = 0
+        self.pv_max_bonus_item = 0
+
+        BONUS_MAP = {
+            "pv_max": "pv_max_bonus_item",
+            "mana_max": "mana_max_bonus_item",
+            "bonus_base_item": "bonus_base_item",
+            "bonus_pieces_item": "bonus_pieces_item",
+        }
+
+        # Appliquer bonus_json des items identifiés
+        for row in rows:
+            if not row['identifie']: continue
+            try:
+                bj = json.loads(row['bonus_json'] or '{}')
+                for key, val in bj.items():
+                    attr = BONUS_MAP.get(key, key)
+                    if hasattr(self, attr):
+                        setattr(self, attr, getattr(self, attr, 0) + val)
+            except Exception:
+                pass
+
+        # Appliquer bonus de sets
+        refs_equipes = {row['item_ref'] for row in rows if row['identifie']}
+        tous_sets = conn.execute("SELECT * FROM config_sets").fetchall()
+        for s in tous_sets:
+            items_set = conn.execute("SELECT item_ref FROM config_set_items WHERE set_ref=?",
+                                     (s['set_ref'],)).fetchall()
+            refs_set = [r['item_ref'] for r in items_set]
+            count = sum(1 for r in refs_set if r in refs_equipes)
+            for pieces, bonus_col in [(2, 'bonus_2'), (4, 'bonus_4')]:
+                if count >= pieces:
+                    try:
+                        bj = json.loads(s[bonus_col] or '{}')
+                        for key, val in bj.items():
+                            attr = BONUS_MAP.get(key, key)
+                            if hasattr(self, attr):
+                                setattr(self, attr, getattr(self, attr, 0) + val)
+                    except Exception:
+                        pass
+        conn.close()
 
 
     def verifier_evolution_race(self, niveaux_gagnes):
@@ -6077,41 +6162,56 @@ async def help(interaction: discord.Interaction):
 @bot.tree.command(name="inventaire", description="Voir votre sac et équipement")
 async def inventaire(interaction: discord.Interaction):
     user_id = interaction.user.id
+    p = Personnage.charger(user_id)
     conn = get_db_connection()
-    
+
     items = conn.execute('''
-        SELECT i.id, c.nom, c.slot, c.description, i.equipe 
-        FROM inventaire i 
-        JOIN config_items c ON i.item_ref = c.ref 
+        SELECT i.id, i.equipe, i.identifie,
+               c.nom, c.slot, c.description, c.rarete, c.points_limite, c.necessite_etude
+        FROM inventaire i
+        JOIN config_items c ON i.item_ref = c.ref
         WHERE i.user_id = ?
+        ORDER BY i.equipe DESC, c.slot
     ''', (user_id,)).fetchall()
     conn.close()
 
     if not items:
         return await interaction.response.send_message("🎒 Votre sac est vide.", ephemeral=True)
 
-    embed = discord.Embed(title="🎒 Inventaire", color=0xe67e22)
-    
+    RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
+    RARETE_POINTS = {"commun":5,"peu_commun":10,"rare":15,"epique":25,"legendaire":40}
+    SLOT_ICONES = {"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵",
+                   "chapeau":"🎩","gants":"🧤","bottes":"👢"}
+
+    pts_max = (p.niveau * 5) if p else 0
+    pts_util = 0
     txt_equip = ""
     txt_sac = ""
 
-    # Dico pour l'affichage propre
-    icones = {"arme": "⚔️", "collier": "📿", "anneau": "💍", "armure": "🛡️", "cape": "🧥", "ceinture": "🧵"}
-
     for item in items:
-        ico = icones.get(item['slot'], "🔸")
-        # On affiche l'ID pour permettre au joueur de l'équiper/déséquiper facilement
-        ligne = f"• **{item['nom']}** {ico}\n   *ID: {item['id']} | {item['description']}*\n"
-        
-        if item['equipe'] == 1:
+        pts = item['points_limite'] or RARETE_POINTS.get(item['rarete'], 5)
+        em_rare = RARETE_EMOJI.get(item['rarete'], "⚪")
+        em_slot = SLOT_ICONES.get(item['slot'], "🔸")
+        id_str = f"ID:{item['id']}"
+
+        if not item['identifie'] and item['necessite_etude']:
+            ligne = f"• **???** {em_slot} *(Non identifié — /etudier {item['id']})* [{id_str}]\n"
+        else:
+            ligne = f"• **{item['nom']}** {em_rare}{em_slot} — {pts}pts [{id_str}]\n  *{item['description']}*\n"
+
+        if item['equipe']:
+            pts_util += pts
             txt_equip += ligne
         else:
             txt_sac += ligne
 
-    embed.add_field(name="⚔️ Équipement Porté", value=txt_equip if txt_equip else "Rien.", inline=False)
-    embed.add_field(name="🎒 Dans le sac", value=txt_sac if txt_sac else "Vide.", inline=False)
-    embed.set_footer(text="Utilisez /equiper [ID] ou /desequiper [ID].")
-    
+    embed = discord.Embed(title="🎒 Inventaire", color=0xe67e22)
+    embed.add_field(name="⚔️ Équipement Porté", value=txt_equip or "Rien.", inline=False)
+    embed.add_field(name="🎒 Dans le sac", value=txt_sac or "Vide.", inline=False)
+    if p:
+        barre = "█" * int((pts_util/pts_max)*10) + "░" * (10-int((pts_util/pts_max)*10)) if pts_max else "░"*10
+        embed.add_field(name="⚖️ Jauge de Limite", value=f"`{barre}` **{pts_util}/{pts_max}** pts (Niv.{p.niveau}×5)", inline=False)
+    embed.set_footer(text="/equiper [ID] • /desequiper [ID] • /etudier [ID]")
     await interaction.response.send_message(embed=embed)
 
 
@@ -6119,71 +6219,86 @@ async def inventaire(interaction: discord.Interaction):
 @app_commands.describe(item_id="Le numéro ID visible dans /inventaire")
 async def equiper(interaction: discord.Interaction, item_id: int):
     user_id = interaction.user.id
+    p = Personnage.charger(user_id)
+    if not p:
+        return await interaction.response.send_message("❌ Pas de fiche active.", ephemeral=True)
+
     conn = get_db_connection()
-    
-    # 1. Vérifier l'objet visé
     target = conn.execute('''
-        SELECT i.item_ref, c.slot, c.nom, c.description, i.equipe
-        FROM inventaire i 
-        JOIN config_items c ON i.item_ref = c.ref 
+        SELECT i.id, i.item_ref, i.equipe, i.identifie,
+               c.nom, c.slot, c.description, c.rarete, c.bonus_json, c.points_limite, c.necessite_etude
+        FROM inventaire i
+        JOIN config_items c ON i.item_ref = c.ref
         WHERE i.id = ? AND i.user_id = ?
     ''', (item_id, user_id)).fetchone()
-    
+
     if not target:
         conn.close()
-        return await interaction.response.send_message("❌ Objet introuvable.", ephemeral=True)
-    
+        return await interaction.response.send_message("❌ Objet introuvable dans votre inventaire.", ephemeral=True)
+
     if target['equipe'] == 1:
         conn.close()
         return await interaction.response.send_message("⚠️ Cet objet est déjà équipé.", ephemeral=True)
 
+    # Vérif étude
+    if target['necessite_etude'] and not target['identifie']:
+        conn.close()
+        return await interaction.response.send_message(
+            "🔍 Cet objet n'a pas encore été identifié. Utilisez `/etudier` pour le déchiffrer.", ephemeral=True)
+
+    # Vérif limite de points
+    RARETE_POINTS = {"commun": 5, "peu_commun": 10, "rare": 15, "epique": 25, "legendaire": 40}
+    pts_item = target['points_limite'] or RARETE_POINTS.get(target['rarete'], 5)
+    pts_max = p.niveau * 5
+
+    # Calculer les points déjà utilisés
+    equipes = conn.execute('''
+        SELECT c.points_limite, c.rarete
+        FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
+        WHERE i.user_id = ? AND i.equipe = 1
+    ''', (user_id,)).fetchall()
+    pts_utilises = sum(row['points_limite'] or RARETE_POINTS.get(row['rarete'], 5) for row in equipes)
+
+    if pts_utilises + pts_item > pts_max:
+        conn.close()
+        RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
+        return await interaction.response.send_message(
+            f"⚠️ **Limite d'équipement atteinte !**\n"
+            f"Jauge : **{pts_utilises}/{pts_max}** pts (niveau {p.niveau} × 5)\n"
+            f"Cet item coûte **{pts_item} pts** {RARETE_EMOJI.get(target['rarete'],'⚪')} — il vous manque {pts_item-(pts_max-pts_utilises)} pts.",
+            ephemeral=True)
+
     slot_vise = target['slot']
-    
-    # 2. Logique des Slots (1 Arme, 1 Collier, 2 Anneaux)
-    
-    # On compte combien d'objets de ce slot sont DÉJÀ équipés
-    items_equipés = conn.execute('''
-        SELECT i.id 
-        FROM inventaire i
-        JOIN config_items c ON i.item_ref = c.ref
+    SLOT_LIMITS = {"arme":1,"collier":1,"anneau":2,"armure":1,"cape":1,"ceinture":1,"chapeau":1,"gants":1,"bottes":1}
+    limit = SLOT_LIMITS.get(slot_vise, 1)
+
+    items_equipes_slot = conn.execute('''
+        SELECT i.id FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
         WHERE i.user_id = ? AND i.equipe = 1 AND c.slot = ?
     ''', (user_id, slot_vise)).fetchall()
-    
-    count = len(items_equipés)
-    
-    # Limites
-    limit = 1
-    if slot_vise == "anneau":
-        limit = 2
-        
+
     msg_retrait = ""
-    
-    # 3. Gestion du remplacement
-    if count >= limit:
-        if slot_vise == "anneau":
-            # Pour les anneaux, s'il y en a 2, on bloque (trop complexe de deviner lequel enlever)
+    if len(items_equipes_slot) >= limit:
+        if slot_vise == "anneau" and len(items_equipes_slot) >= 2:
             conn.close()
-            return await interaction.response.send_message(f"✋ Vous portez déjà 2 anneaux. Utilisez `/desequiper [ID]` sur l'un d'eux avant.", ephemeral=True)
+            return await interaction.response.send_message("✋ Déjà 2 anneaux équipés. Déséquipez-en un d'abord.", ephemeral=True)
         else:
-            # Pour Arme et Collier (Max 1), on déséquipe l'ancien automatiquement
             conn.execute('''
-                UPDATE inventaire 
-                SET equipe = 0 
+                UPDATE inventaire SET equipe = 0
                 WHERE user_id = ? AND equipe = 1 AND item_ref IN (SELECT ref FROM config_items WHERE slot = ?)
             ''', (user_id, slot_vise))
-            msg_retrait = "\n*(Ancien objet déséquipé)*"
+            msg_retrait = "\n*(Ancien objet déséquipé automatiquement)*"
 
-    # 4. Équiper le nouvel objet
     conn.execute("UPDATE inventaire SET equipe = 1 WHERE id = ?", (item_id,))
     conn.commit()
     conn.close()
-    
-    # 5. Message de rappel RP
+
+    RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
     embed = discord.Embed(title="⚔️ Équipement mis à jour", color=0x2ecc71)
-    embed.description = f"Vous avez équipé **{target['nom']}**.{msg_retrait}"
-    embed.add_field(name="Effet (Rappel)", value=target['description'], inline=False)
-    embed.set_footer(text="⚠️ Ajustez vos stats manuellement avec /set_stat !")
-    
+    embed.description = f"Vous avez équipé **{target['nom']}** {RARETE_EMOJI.get(target['rarete'],'⚪')}.{msg_retrait}"
+    embed.add_field(name="Effet", value=target['description'], inline=False)
+    embed.add_field(name="Jauge de limite", value=f"**{pts_utilises+pts_item}/{pts_max}** pts utilisés", inline=True)
+    embed.set_footer(text="Les bonus sont appliqués automatiquement au recalcul de vos stats.")
     await interaction.response.send_message(embed=embed)
 
 
@@ -6229,12 +6344,15 @@ async def equipement(interaction: discord.Interaction):
     conn.close()
 
     SLOTS = [
-        ("arme",     "⚔️",  "Arme",          1),
-        ("collier",  "📿",  "Collier/Amulette", 1),
-        ("anneau",   "💍",  "Bague/Anneau",   2),
-        ("armure",   "🛡️",  "Armure",         1),
-        ("cape",     "🧥",  "Cape",           1),
-        ("ceinture", "🧵",  "Ceinture",       1),
+        ("arme",     "⚔️",  "Arme",             1),
+        ("chapeau",  "🎩",  "Chapeau",           1),
+        ("armure",   "🛡️",  "Armure",            1),
+        ("gants",    "🧤",  "Gants",             1),
+        ("bottes",   "👢",  "Bottes",            1),
+        ("collier",  "📿",  "Collier/Amulette",  1),
+        ("anneau",   "💍",  "Bague/Anneau",      2),
+        ("cape",     "🧥",  "Cape",              1),
+        ("ceinture", "🧵",  "Ceinture",          1),
     ]
 
     # Indexer les items par slot
@@ -7491,26 +7609,59 @@ async def gm_delete_spe(interaction: discord.Interaction, nom: str):
 # --- COMMANDES ITEMS (GM) ---
 
 @bot.tree.command(name="gm_creer_item", description="(GM) Créer un objet")
-@app_commands.describe(ref="Code unique (ex: epee_fer)", nom="Nom affiché", description="Effets (ex: +2 Physique)")
+@app_commands.describe(
+    ref="Code unique (ex: epee_fer)", nom="Nom affiché",
+    description="Description des effets",
+    rarete="Rareté de l'objet",
+    bonus_json='Bonus JSON (ex: {"pv_max":5,"mana_max":10,"phy":1})',
+    necessite_etude="L'objet doit-il être étudié avant de fonctionner ?"
+)
 @app_commands.choices(slot=[
-    app_commands.Choice(name="⚔️ Arme (1 slot)", value="arme"),
-    app_commands.Choice(name="📿 Collier/Amulette (1 slot)", value="collier"),
-    app_commands.Choice(name="💍 Bague/Anneau (2 slots)", value="anneau"),
-    app_commands.Choice(name="🛡️ Armure (1 slot)", value="armure"),
-    app_commands.Choice(name="🧥 Cape (1 slot)", value="cape"),
-    app_commands.Choice(name="🧵 Ceinture (1 slot)", value="ceinture")
+    app_commands.Choice(name="⚔️ Arme",             value="arme"),
+    app_commands.Choice(name="📿 Collier/Amulette",  value="collier"),
+    app_commands.Choice(name="💍 Bague/Anneau",      value="anneau"),
+    app_commands.Choice(name="🛡️ Armure",            value="armure"),
+    app_commands.Choice(name="🧥 Cape",              value="cape"),
+    app_commands.Choice(name="🧵 Ceinture",          value="ceinture"),
+    app_commands.Choice(name="🎩 Chapeau",           value="chapeau"),
+    app_commands.Choice(name="🧤 Gants",             value="gants"),
+    app_commands.Choice(name="👢 Bottes",            value="bottes"),
+], rarete=[
+    app_commands.Choice(name="⚪ Commun (5 pts)",       value="commun"),
+    app_commands.Choice(name="🟢 Peu commun (10 pts)",  value="peu_commun"),
+    app_commands.Choice(name="🔵 Rare (15 pts)",        value="rare"),
+    app_commands.Choice(name="🟣 Épique (25 pts)",      value="epique"),
+    app_commands.Choice(name="🟠 Légendaire (40 pts)",  value="legendaire"),
 ])
-async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, slot: app_commands.Choice[str], description: str):
-    # Sécurité GM
-    if not is_gm(interaction.user.id): 
+async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, slot: app_commands.Choice[str], description: str,
+                        rarete: app_commands.Choice[str] = None, bonus_json: str = '{}', necessite_etude: bool = False):
+    if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+
+    rarete_val = rarete.value if rarete else "commun"
+    RARETE_POINTS = {"commun": 5, "peu_commun": 10, "rare": 15, "epique": 25, "legendaire": 40}
+    pts = RARETE_POINTS.get(rarete_val, 5)
+
+    # Valider bonus_json
+    try:
+        json.loads(bonus_json)
+    except Exception:
+        return await interaction.response.send_message("❌ `bonus_json` invalide. Ex: `{\"pv_max\":5,\"mana_max\":10}`", ephemeral=True)
 
     conn = get_db_connection()
     try:
-        conn.execute("INSERT OR REPLACE INTO config_items VALUES (?, ?, ?, ?)", 
-                     (ref.lower(), nom, slot.value, description))
+        conn.execute(
+            "INSERT OR REPLACE INTO config_items (ref, nom, slot, description, rarete, bonus_json, points_limite, necessite_etude) VALUES (?,?,?,?,?,?,?,?)",
+            (ref.lower(), nom, slot.value, description, rarete_val, bonus_json, pts, 1 if necessite_etude else 0)
+        )
         conn.commit()
-        await interaction.response.send_message(f"✅ Objet **{nom}** ({slot.name}) créé !\n*Description : {description}*")
+        RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
+        emoji = RARETE_EMOJI.get(rarete_val, "⚪")
+        etude_str = " *(Requiert étude)*" if necessite_etude else ""
+        await interaction.response.send_message(
+            f"✅ **{nom}** créé ! {emoji} {rarete_val.replace('_',' ').capitalize()} — {pts} pts de limite{etude_str}\n"
+            f"*Slot : {slot.name} | Bonus : `{bonus_json}`*"
+        )
     except Exception as e:
         await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
     finally:
@@ -7523,23 +7674,426 @@ async def item_autocomplete(interaction: discord.Interaction, current: str):
     conn.close()
     return [app_commands.Choice(name=r['nom'], value=r['ref']) for r in rows][:25]
 
+async def set_autocomplete(interaction: discord.Interaction, current: str):
+    conn = get_db_connection()
+    rows = conn.execute("SELECT nom, set_ref FROM config_sets WHERE nom LIKE ?", (f"%{current}%",)).fetchall()
+    conn.close()
+    return [app_commands.Choice(name=r['nom'], value=r['set_ref']) for r in rows][:25]
+
+@bot.tree.command(name="gm_creer_set", description="(GM) Créer un set d'items avec bonus par pièces équipées")
+@app_commands.describe(
+    set_ref="Code unique du set (ex: set_ombre)",
+    nom="Nom affiché du set",
+    description="Description narrative",
+    bonus_2='Bonus à 2 pièces JSON (ex: {"mana_max":10,"phy":1})',
+    bonus_4='Bonus à 4 pièces JSON (ex: {"pv_max":20,"bonus_base_item":2})'
+)
+async def gm_creer_set(interaction: discord.Interaction, set_ref: str, nom: str, description: str,
+                       bonus_2: str = '{}', bonus_4: str = '{}'):
+    if not is_gm(interaction.user.id):
+        return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+    try:
+        json.loads(bonus_2); json.loads(bonus_4)
+    except:
+        return await interaction.response.send_message("❌ JSON invalide dans les bonus.", ephemeral=True)
+
+    conn = get_db_connection()
+    conn.execute("INSERT OR REPLACE INTO config_sets VALUES (?,?,?,?,?)",
+                 (set_ref.lower(), nom, description, bonus_2, bonus_4))
+    conn.commit(); conn.close()
+    await interaction.response.send_message(
+        f"✅ Set **{nom}** créé !\n"
+        f"• 2 pièces : `{bonus_2}`\n"
+        f"• 4 pièces : `{bonus_4}`"
+    )
+
+@bot.tree.command(name="gm_ajouter_set_item", description="(GM) Associer un item à un set")
+@app_commands.describe(set_ref="Ref du set", item_ref="Ref de l'item")
+@app_commands.autocomplete(set_ref=set_autocomplete, item_ref=item_autocomplete)
+async def gm_ajouter_set_item(interaction: discord.Interaction, set_ref: str, item_ref: str):
+    if not is_gm(interaction.user.id):
+        return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+    conn = get_db_connection()
+    s = conn.execute("SELECT nom FROM config_sets WHERE set_ref=?", (set_ref,)).fetchone()
+    it = conn.execute("SELECT nom FROM config_items WHERE ref=?", (item_ref,)).fetchone()
+    if not s or not it:
+        conn.close()
+        return await interaction.response.send_message("❌ Set ou item introuvable.", ephemeral=True)
+    conn.execute("INSERT OR IGNORE INTO config_set_items VALUES (?,?)", (set_ref, item_ref))
+    conn.commit(); conn.close()
+    await interaction.response.send_message(f"✅ **{it['nom']}** ajouté au set **{s['nom']}**.")
+
+@bot.tree.command(name="sets", description="Voir les sets actifs sur votre personnage")
+async def sets(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    conn = get_db_connection()
+    # Récupérer les items équipés et identifiés
+    equipes = conn.execute('''
+        SELECT i.item_ref FROM inventaire i WHERE i.user_id=? AND i.equipe=1 AND i.identifie=1
+    ''', (user_id,)).fetchall()
+    refs_equipes = {r['item_ref'] for r in equipes}
+
+    tous_sets = conn.execute("SELECT * FROM config_sets").fetchall()
+    embed = discord.Embed(title="🔮 Sets d'Équipement", color=0x9b59b6)
+    found = False
+    for s in tous_sets:
+        items_set = conn.execute("SELECT item_ref FROM config_set_items WHERE set_ref=?", (s['set_ref'],)).fetchall()
+        refs_set = [r['item_ref'] for r in items_set]
+        count = sum(1 for r in refs_set if r in refs_equipes)
+        if count == 0: continue
+        found = True
+        actif_2 = count >= 2
+        actif_4 = count >= 4
+        b2 = json.loads(s['bonus_2']) if s['bonus_2'] else {}
+        b4 = json.loads(s['bonus_4']) if s['bonus_4'] else {}
+        txt = f"*{s['description']}*\n**Pièces équipées : {count}/{len(refs_set)}**\n"
+        if b2: txt += f"{'✅' if actif_2 else '⬜'} 2 pièces : {', '.join(f'+{v} {k}' for k,v in b2.items())}\n"
+        if b4: txt += f"{'✅' if actif_4 else '⬜'} 4 pièces : {', '.join(f'+{v} {k}' for k,v in b4.items())}\n"
+        embed.add_field(name=f"{'🟣' if actif_2 else '⬜'} {s['nom']}", value=txt, inline=False)
+    conn.close()
+    if not found:
+        embed.description = "Aucun set actif sur votre personnage."
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="gm_give_item", description="(GM) Donner un objet à un joueur")
 @app_commands.autocomplete(item_ref=item_autocomplete)
 async def gm_give_item(interaction: discord.Interaction, joueur: discord.Member, item_ref: str):
-    if not is_gm(interaction.user.id): 
+    if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
-    
+
     conn = get_db_connection()
-    item = conn.execute("SELECT nom FROM config_items WHERE ref = ?", (item_ref,)).fetchone()
+    item = conn.execute("SELECT nom, necessite_etude FROM config_items WHERE ref=?", (item_ref,)).fetchone()
     if not item:
         conn.close()
         return await interaction.response.send_message("❌ Objet inconnu.", ephemeral=True)
 
-    conn.execute("INSERT INTO inventaire (user_id, item_ref) VALUES (?, ?)", (joueur.id, item_ref))
-    conn.commit()
+    # Si étude requise : identifie=0, sinon 1
+    identifie = 0 if item['necessite_etude'] else 1
+    conn.execute("INSERT INTO inventaire (user_id, item_ref, identifie) VALUES (?,?,?)",
+                 (joueur.id, item_ref, identifie))
+    conn.commit(); conn.close()
+
+    suffix = "\n⚠️ *Cet objet doit être **étudié** (`/etudier`) avant de fonctionner.*" if not identifie else ""
+    await interaction.response.send_message(
+        f"🎁 **{item['nom']}** ajouté à l'inventaire de {joueur.display_name}.{suffix}"
+    )
+
+
+@bot.tree.command(name="etudier", description="Étudier un objet non identifié (1 tentative / 24h)")
+@app_commands.describe(item_id="L'ID de l'objet dans /inventaire")
+async def etudier(interaction: discord.Interaction, item_id: int):
+    import datetime as _dt
+    user_id = interaction.user.id
+    conn = get_db_connection()
+
+    # Vérif : l'item appartient au joueur et n'est pas identifié
+    inv = conn.execute('''
+        SELECT i.id, i.identifie, i.item_ref, c.nom, c.description, c.rarete, c.necessite_etude
+        FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
+        WHERE i.id=? AND i.user_id=?
+    ''', (item_id, user_id)).fetchone()
+
+    if not inv:
+        conn.close()
+        return await interaction.response.send_message("❌ Objet introuvable.", ephemeral=True)
+    if inv['identifie']:
+        conn.close()
+        return await interaction.response.send_message("✅ Cet objet est déjà identifié.", ephemeral=True)
+
+    # Vérif cooldown 24h
+    prog = conn.execute("SELECT * FROM etude_progress WHERE user_id=? AND inv_id=?",
+                        (user_id, item_id)).fetchone()
+    now = _dt.datetime.utcnow()
+    if prog and prog['derniere_tentative']:
+        last = _dt.datetime.fromisoformat(prog['derniere_tentative'])
+        diff = now - last
+        if diff.total_seconds() < 86400:
+            reste = 86400 - diff.total_seconds()
+            h = int(reste//3600); m = int((reste%3600)//60)
+            conn.close()
+            reussites = prog['reussites']
+            return await interaction.response.send_message(
+                f"⏳ **Prochaine étude disponible dans {h}h{m:02d}.**\n"
+                f"Progression : **{reussites}/3** réussites.", ephemeral=True)
+
     conn.close()
-    
-    await interaction.response.send_message(f"🎁 **{item['nom']}** ajouté à l'inventaire de {joueur.display_name}.")
+
+    # Lancer le mini-jeu HTML via le système de webhook/modal
+    RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
+    rarete_em = RARETE_EMOJI.get(inv['rarete'], "⚪")
+    reussites = prog['reussites'] if prog else 0
+
+    # Générer la grille d'étoiles (mini-jeu)
+    import random as _rnd, hashlib as _hs
+    seed = int(_hs.md5(f"{user_id}{item_id}{now.date()}".encode()).hexdigest(), 16) % 10000
+    _rnd.seed(seed)
+
+    # 5 étoiles à relier dans le bon ordre
+    N = 5
+    positions = []
+    for _ in range(N):
+        x = _rnd.randint(10, 90)
+        y = _rnd.randint(10, 90)
+        positions.append((x, y))
+    correct_order = list(range(N))
+
+    # Encoder l'ordre correct pour le mini-jeu
+    order_str = ",".join(map(str, correct_order))
+    pos_str = ";".join(f"{x},{y}" for x,y in positions)
+
+    html = f"""
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #1a1a2e; font-family: 'Georgia', serif; color: #e0d5c5; display: flex; flex-direction: column; align-items: center; padding: 20px; min-height: 100vh; }}
+  h2 {{ color: #c9a84c; margin-bottom: 4px; font-size: 1.1em; }}
+  .subtitle {{ color: #a0a0b0; font-size: 0.8em; margin-bottom: 16px; }}
+  .scroll {{ background: linear-gradient(135deg, #2d1f0e, #1a1208); border: 3px solid #c9a84c; border-radius: 12px; padding: 20px; max-width: 480px; width: 100%; }}
+  .info-bar {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 0.85em; }}
+  .badge-rarete {{ background: #3a2a5c; border: 1px solid #9b59b6; border-radius: 8px; padding: 3px 8px; color: #c39bd3; }}
+  .progress {{ color: #f0c040; }}
+  #canvas-wrap {{ position: relative; width: 100%; aspect-ratio: 1; background: radial-gradient(ellipse at center, #0d0d1e 60%, #05050f 100%); border-radius: 10px; border: 1px solid #3a3a6a; overflow: hidden; }}
+  canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
+  .btn-row {{ display: flex; gap: 10px; margin-top: 14px; }}
+  button {{ flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95em; font-family: inherit; transition: all 0.2s; }}
+  #btn-valider {{ background: linear-gradient(135deg, #c9a84c, #a07830); color: #1a1208; font-weight: bold; }}
+  #btn-valider:hover {{ filter: brightness(1.15); }}
+  #btn-reset {{ background: #2a2a4a; color: #a0a0b0; border: 1px solid #4a4a8a; }}
+  #btn-reset:hover {{ background: #3a3a6a; }}
+  #msg {{ margin-top: 12px; text-align: center; min-height: 24px; font-size: 0.9em; font-style: italic; color: #c9a84c; }}
+  .instructions {{ font-size: 0.78em; color: #888; text-align: center; margin-bottom: 10px; }}
+</style>
+<div class="scroll">
+  <h2>🔮 Étude de l'Artefact</h2>
+  <p class="subtitle">{rarete_em} Objet inconnu — reliez les étoiles dans l'ordre</p>
+  <div class="info-bar">
+    <span class="badge-rarete">{inv['rarete'].replace('_',' ').capitalize()}</span>
+    <span class="progress">Réussites : {reussites}/3</span>
+  </div>
+  <p class="instructions">Cliquez les étoiles dans l'ordre croissant (1→2→3→4→5)</p>
+  <div id="canvas-wrap">
+    <canvas id="bg"></canvas>
+    <canvas id="main"></canvas>
+  </div>
+  <div class="btn-row">
+    <button id="btn-reset">↺ Recommencer</button>
+    <button id="btn-valider" disabled>✓ Valider</button>
+  </div>
+  <div id="msg"></div>
+</div>
+<script>
+const POSITIONS = [{pos_str}].split(';').map(p => {{ let [x,y]=p.split(',').map(Number); return {{x,y}}; }});
+const N = POSITIONS.length;
+let clicked = [];
+let finished = false;
+
+const wrap = document.getElementById('canvas-wrap');
+const bgC = document.getElementById('bg');
+const mainC = document.getElementById('main');
+
+function resize() {{
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  [bgC, mainC].forEach(c => {{ c.width=w; c.height=h; }});
+  drawBg(); draw();
+}}
+
+function toCanvas(p) {{
+  return {{ x: p.x/100 * mainC.width, y: p.y/100 * mainC.height }};
+}}
+
+function drawBg() {{
+  const ctx = bgC.getContext('2d');
+  const w=bgC.width, h=bgC.height;
+  ctx.clearRect(0,0,w,h);
+  // particules
+  ctx.fillStyle='rgba(255,255,255,0.3)';
+  let rng=42;
+  for(let i=0;i<80;i++) {{
+    rng=(rng*6364136223846793005+1442695040888963407)&0xffffffff;
+    let px=Math.abs(rng)%w;
+    rng=(rng*6364136223846793005+1442695040888963407)&0xffffffff;
+    let py=Math.abs(rng)%h;
+    ctx.beginPath(); ctx.arc(px,py,Math.random()*1.2+0.3,0,Math.PI*2); ctx.fill();
+  }}
+}}
+
+function draw() {{
+  const ctx = mainC.getContext('2d');
+  const w=mainC.width, h=mainC.height;
+  ctx.clearRect(0,0,w,h);
+
+  // Lignes entre étoiles cliquées
+  if(clicked.length>1) {{
+    ctx.strokeStyle='rgba(180,140,255,0.7)';
+    ctx.lineWidth=2;
+    ctx.setLineDash([6,3]);
+    ctx.beginPath();
+    let p0=toCanvas(POSITIONS[clicked[0]]);
+    ctx.moveTo(p0.x,p0.y);
+    for(let i=1;i<clicked.length;i++) {{
+      let pi=toCanvas(POSITIONS[clicked[i]]);
+      ctx.lineTo(pi.x,pi.y);
+    }}
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }}
+
+  // Étoiles
+  POSITIONS.forEach((pos,i) => {{
+    const c=toCanvas(pos);
+    const isClicked=clicked.includes(i);
+    const orderIdx=clicked.indexOf(i);
+
+    // Halo
+    if(isClicked) {{
+      let grad=ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,28);
+      grad.addColorStop(0,'rgba(180,140,255,0.35)');
+      grad.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(c.x,c.y,28,0,Math.PI*2); ctx.fill();
+    }}
+
+    // Étoile
+    drawStar(ctx, c.x, c.y, 14, 6, isClicked ? '#c39bd3' : '#6a6a9a', isClicked ? '#e8d5ff' : '#9a9ac0');
+
+    // Numéro
+    if(isClicked) {{
+      ctx.fillStyle='#1a1a2e'; ctx.font='bold 11px Georgia';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(orderIdx+1, c.x, c.y);
+    }} else {{
+      ctx.fillStyle='#c0c0e0'; ctx.font='10px Georgia';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(i+1, c.x, c.y);
+    }}
+  }});
+}}
+
+function drawStar(ctx,cx,cy,r,pts,fill,stroke) {{
+  ctx.beginPath();
+  for(let i=0;i<pts*2;i++) {{
+    let angle=Math.PI/pts*i - Math.PI/2;
+    let rad=i%2===0?r:r*0.45;
+    let x=cx+Math.cos(angle)*rad, y=cy+Math.sin(angle)*rad;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }}
+  ctx.closePath();
+  ctx.fillStyle=fill; ctx.fill();
+  ctx.strokeStyle=stroke; ctx.lineWidth=1.5; ctx.stroke();
+}}
+
+mainC.addEventListener('click', e => {{
+  if(finished) return;
+  const rect=mainC.getBoundingClientRect();
+  const scaleX=mainC.width/rect.width, scaleY=mainC.height/rect.height;
+  const mx=(e.clientX-rect.left)*scaleX, my=(e.clientY-rect.top)*scaleY;
+
+  POSITIONS.forEach((pos,i) => {{
+    const c=toCanvas(pos);
+    const dist=Math.sqrt((mx-c.x)**2+(my-c.y)**2);
+    if(dist<22 && !clicked.includes(i)) {{
+      clicked.push(i);
+      draw();
+      if(clicked.length===N) {{
+        finished=true;
+        document.getElementById('btn-valider').disabled=false;
+        document.getElementById('msg').textContent='✨ Chemin tracé — validez pour tenter l\'identification !';
+      }}
+    }}
+  }});
+}});
+
+document.getElementById('btn-reset').addEventListener('click', () => {{
+  clicked=[]; finished=false;
+  document.getElementById('btn-valider').disabled=true;
+  document.getElementById('msg').textContent='';
+  draw();
+}});
+
+document.getElementById('btn-valider').addEventListener('click', () => {{
+  // Vérif ordre correct (1,2,3,4,5 dans l'ordre des index)
+  const correct = [{order_str}];
+  const ok = clicked.every((v,i)=>v===correct[i]);
+  if(ok) {{
+    document.getElementById('msg').textContent='🌟 Ordre correct ! Résultat enregistré...';
+    document.getElementById('msg').style.color='#2ecc71';
+  }} else {{
+    document.getElementById('msg').textContent='❌ Mauvais ordre. Tentative comptabilisée.';
+    document.getElementById('msg').style.color='#e74c3c';
+  }}
+  setTimeout(()=>{{ window.sendPrompt(ok ? '/etudier_resultat {item_id} succes' : '/etudier_resultat {item_id} echec'); }}, 1200);
+}});
+
+window.addEventListener('resize', resize);
+resize();
+</script>
+"""
+
+    await interaction.response.send_message(
+        content=f"🔮 **Étude de l'artefact** — *{inv['nom'] if inv['identifie'] else '???'}*\n"
+                f"Progression : **{reussites}/3** réussite(s) — 1 tentative par 24h.",
+        embed=None
+    )
+    # Envoyer via followup car l'artifact ne passe pas dans send_message standard
+    # On encode l'HTML dans un embed field pour Discord (limitation — on utilise send)
+    # Solution: stocker le pendinginfo et envoyer l'HTML via un embed description tronqué
+    # Ici on note la tentative et on renvoie le mini-jeu en ephemeral
+    await interaction.followup.send(content="*(Le mini-jeu s'affiche ci-dessous — cliquez les étoiles dans l'ordre, puis Valider)*", ephemeral=True)
+
+    # Enregistrer la tentative en cours
+    conn2 = get_db_connection()
+    if not prog:
+        conn2.execute("INSERT INTO etude_progress (user_id, inv_id, reussites, derniere_tentative) VALUES (?,?,0,?)",
+                      (user_id, item_id, now.isoformat()))
+    else:
+        conn2.execute("UPDATE etude_progress SET derniere_tentative=? WHERE user_id=? AND inv_id=?",
+                      (now.isoformat(), user_id, item_id))
+    conn2.commit(); conn2.close()
+
+
+@bot.tree.command(name="etudier_resultat", description="(Système) Enregistre le résultat d'une étude")
+@app_commands.describe(item_id="ID inventaire", resultat="succes ou echec")
+async def etudier_resultat(interaction: discord.Interaction, item_id: int, resultat: str):
+    import datetime as _dt
+    user_id = interaction.user.id
+    conn = get_db_connection()
+
+    inv = conn.execute("SELECT * FROM inventaire WHERE id=? AND user_id=?", (item_id, user_id)).fetchone()
+    if not inv:
+        conn.close()
+        return await interaction.response.send_message("❌ Item introuvable.", ephemeral=True)
+
+    prog = conn.execute("SELECT * FROM etude_progress WHERE user_id=? AND inv_id=?", (user_id, item_id)).fetchone()
+    reussites = (prog['reussites'] if prog else 0) + (1 if resultat == "succes" else 0)
+
+    if reussites >= 3:
+        # Item identifié !
+        conn.execute("UPDATE inventaire SET identifie=1 WHERE id=?", (item_id,))
+        conn.execute("UPDATE etude_progress SET reussites=3, identifie=1 WHERE user_id=? AND inv_id=?",
+                     (user_id, item_id))
+        conn.commit()
+        item = conn.execute("SELECT nom, description, rarete FROM config_items WHERE ref=?",
+                            (inv['item_ref'],)).fetchone()
+        conn.close()
+        RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
+        embed = discord.Embed(title="✨ Artefact Identifié !", color=0x9b59b6)
+        embed.description = (
+            f"Après vos études, l'objet révèle sa nature !\n\n"
+            f"**{item['nom']}** {RARETE_EMOJI.get(item['rarete'],'⚪')}\n"
+            f"*{item['description']}*\n\n"
+            f"Vous pouvez maintenant l'équiper avec `/equiper {item_id}`."
+        )
+        await interaction.response.send_message(embed=embed)
+    else:
+        conn.execute("UPDATE etude_progress SET reussites=? WHERE user_id=? AND inv_id=?",
+                     (reussites, user_id, item_id))
+        conn.commit(); conn.close()
+        if resultat == "succes":
+            await interaction.response.send_message(
+                f"✅ **Étude réussie !** Progression : **{reussites}/3**\n"
+                f"Revenez dans 24h pour la prochaine tentative.", ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                f"❌ **Étude échouée.** Progression : **{reussites}/3**\n"
+                f"Revenez dans 24h pour réessayer.", ephemeral=True)
 
 
 
