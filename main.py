@@ -7783,10 +7783,11 @@ async def gm_give_item(interaction: discord.Interaction, joueur: discord.Member,
 @app_commands.describe(item_id="L'ID de l'objet dans /inventaire")
 async def etudier(interaction: discord.Interaction, item_id: int):
     import datetime as _dt
+    import random as _rnd
+    import hashlib as _hs
     user_id = interaction.user.id
     conn = get_db_connection()
 
-    # Vérif : l'item appartient au joueur et n'est pas identifié
     inv = conn.execute('''
         SELECT i.id, i.identifie, i.item_ref, c.nom, c.description, c.rarete, c.necessite_etude
         FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
@@ -7795,313 +7796,148 @@ async def etudier(interaction: discord.Interaction, item_id: int):
 
     if not inv:
         conn.close()
-        return await interaction.response.send_message("❌ Objet introuvable.", ephemeral=True)
+        return await interaction.response.send_message("❌ Objet introuvable dans votre inventaire.", ephemeral=True)
     if inv['identifie']:
         conn.close()
-        return await interaction.response.send_message("✅ Cet objet est déjà identifié.", ephemeral=True)
+        return await interaction.response.send_message("✅ Cet objet est déjà identifié !", ephemeral=True)
+    if not inv['necessite_etude']:
+        conn.close()
+        return await interaction.response.send_message("ℹ️ Cet objet ne nécessite pas d'étude.", ephemeral=True)
 
-    # Vérif cooldown 24h
     prog = conn.execute("SELECT * FROM etude_progress WHERE user_id=? AND inv_id=?",
                         (user_id, item_id)).fetchone()
     now = _dt.datetime.utcnow()
+
     if prog and prog['derniere_tentative']:
         last = _dt.datetime.fromisoformat(prog['derniere_tentative'])
         diff = now - last
         if diff.total_seconds() < 86400:
             reste = 86400 - diff.total_seconds()
             h = int(reste//3600); m = int((reste%3600)//60)
-            conn.close()
             reussites = prog['reussites']
+            conn.close()
             return await interaction.response.send_message(
-                f"⏳ **Prochaine étude disponible dans {h}h{m:02d}.**\n"
-                f"Progression : **{reussites}/3** réussites.", ephemeral=True)
+                f"⏳ **Prochaine étude dans {h}h{m:02d}.**\nProgression : **{reussites}/3** réussites.",
+                ephemeral=True)
 
+    reussites = prog['reussites'] if prog else 0
     conn.close()
 
-    # Lancer le mini-jeu HTML via le système de webhook/modal
+    # Générer séquence d'étoiles avec seed du jour
+    seed = int(_hs.md5(f"{user_id}{item_id}{now.date()}".encode()).hexdigest(), 16) % 99999
+    _rnd.seed(seed)
+    N = 5
+    ETOILES = ["⭐","🌟","✨","💫","🌠"]
+    _rnd.shuffle(ETOILES)
+    sequence_correcte = ETOILES[:]  # ordre correct
+    sequence_melangee = ETOILES[:]
+    _rnd.shuffle(sequence_melangee)
+
     RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
     rarete_em = RARETE_EMOJI.get(inv['rarete'], "⚪")
-    reussites = prog['reussites'] if prog else 0
 
-    # Générer la grille d'étoiles (mini-jeu)
-    import random as _rnd, hashlib as _hs
-    seed = int(_hs.md5(f"{user_id}{item_id}{now.date()}".encode()).hexdigest(), 16) % 10000
-    _rnd.seed(seed)
+    # Stocker la session dans les effets temporaires (pas de DB pour ça)
+    # On encode la séquence correcte dans le custom_id des boutons
+    correct_str = "".join(str(sequence_melangee.index(e)) for e in sequence_correcte)
 
-    # 5 étoiles à relier dans le bon ordre
-    N = 5
-    positions = []
-    for _ in range(N):
-        x = _rnd.randint(10, 90)
-        y = _rnd.randint(10, 90)
-        positions.append((x, y))
-    correct_order = list(range(N))
-
-    # Encoder l'ordre correct pour le mini-jeu
-    order_str = ",".join(map(str, correct_order))
-    pos_str = ";".join(f"{x},{y}" for x,y in positions)
-
-    html = f"""
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ background: #1a1a2e; font-family: 'Georgia', serif; color: #e0d5c5; display: flex; flex-direction: column; align-items: center; padding: 20px; min-height: 100vh; }}
-  h2 {{ color: #c9a84c; margin-bottom: 4px; font-size: 1.1em; }}
-  .subtitle {{ color: #a0a0b0; font-size: 0.8em; margin-bottom: 16px; }}
-  .scroll {{ background: linear-gradient(135deg, #2d1f0e, #1a1208); border: 3px solid #c9a84c; border-radius: 12px; padding: 20px; max-width: 480px; width: 100%; }}
-  .info-bar {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 0.85em; }}
-  .badge-rarete {{ background: #3a2a5c; border: 1px solid #9b59b6; border-radius: 8px; padding: 3px 8px; color: #c39bd3; }}
-  .progress {{ color: #f0c040; }}
-  #canvas-wrap {{ position: relative; width: 100%; aspect-ratio: 1; background: radial-gradient(ellipse at center, #0d0d1e 60%, #05050f 100%); border-radius: 10px; border: 1px solid #3a3a6a; overflow: hidden; }}
-  canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
-  .btn-row {{ display: flex; gap: 10px; margin-top: 14px; }}
-  button {{ flex: 1; padding: 10px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95em; font-family: inherit; transition: all 0.2s; }}
-  #btn-valider {{ background: linear-gradient(135deg, #c9a84c, #a07830); color: #1a1208; font-weight: bold; }}
-  #btn-valider:hover {{ filter: brightness(1.15); }}
-  #btn-reset {{ background: #2a2a4a; color: #a0a0b0; border: 1px solid #4a4a8a; }}
-  #btn-reset:hover {{ background: #3a3a6a; }}
-  #msg {{ margin-top: 12px; text-align: center; min-height: 24px; font-size: 0.9em; font-style: italic; color: #c9a84c; }}
-  .instructions {{ font-size: 0.78em; color: #888; text-align: center; margin-bottom: 10px; }}
-</style>
-<div class="scroll">
-  <h2>🔮 Étude de l'Artefact</h2>
-  <p class="subtitle">{rarete_em} Objet inconnu — reliez les étoiles dans l'ordre</p>
-  <div class="info-bar">
-    <span class="badge-rarete">{inv['rarete'].replace('_',' ').capitalize()}</span>
-    <span class="progress">Réussites : {reussites}/3</span>
-  </div>
-  <p class="instructions">Cliquez les étoiles dans l'ordre croissant (1→2→3→4→5)</p>
-  <div id="canvas-wrap">
-    <canvas id="bg"></canvas>
-    <canvas id="main"></canvas>
-  </div>
-  <div class="btn-row">
-    <button id="btn-reset">↺ Recommencer</button>
-    <button id="btn-valider" disabled>✓ Valider</button>
-  </div>
-  <div id="msg"></div>
-</div>
-<script>
-const POSITIONS = [{pos_str}].split(';').map(p => {{ let [x,y]=p.split(',').map(Number); return {{x,y}}; }});
-const N = POSITIONS.length;
-let clicked = [];
-let finished = false;
-
-const wrap = document.getElementById('canvas-wrap');
-const bgC = document.getElementById('bg');
-const mainC = document.getElementById('main');
-
-function resize() {{
-  const w = wrap.clientWidth, h = wrap.clientHeight;
-  [bgC, mainC].forEach(c => {{ c.width=w; c.height=h; }});
-  drawBg(); draw();
-}}
-
-function toCanvas(p) {{
-  return {{ x: p.x/100 * mainC.width, y: p.y/100 * mainC.height }};
-}}
-
-function drawBg() {{
-  const ctx = bgC.getContext('2d');
-  const w=bgC.width, h=bgC.height;
-  ctx.clearRect(0,0,w,h);
-  // particules
-  ctx.fillStyle='rgba(255,255,255,0.3)';
-  let rng=42;
-  for(let i=0;i<80;i++) {{
-    rng=(rng*6364136223846793005+1442695040888963407)&0xffffffff;
-    let px=Math.abs(rng)%w;
-    rng=(rng*6364136223846793005+1442695040888963407)&0xffffffff;
-    let py=Math.abs(rng)%h;
-    ctx.beginPath(); ctx.arc(px,py,Math.random()*1.2+0.3,0,Math.PI*2); ctx.fill();
-  }}
-}}
-
-function draw() {{
-  const ctx = mainC.getContext('2d');
-  const w=mainC.width, h=mainC.height;
-  ctx.clearRect(0,0,w,h);
-
-  // Lignes entre étoiles cliquées
-  if(clicked.length>1) {{
-    ctx.strokeStyle='rgba(180,140,255,0.7)';
-    ctx.lineWidth=2;
-    ctx.setLineDash([6,3]);
-    ctx.beginPath();
-    let p0=toCanvas(POSITIONS[clicked[0]]);
-    ctx.moveTo(p0.x,p0.y);
-    for(let i=1;i<clicked.length;i++) {{
-      let pi=toCanvas(POSITIONS[clicked[i]]);
-      ctx.lineTo(pi.x,pi.y);
-    }}
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }}
-
-  // Étoiles
-  POSITIONS.forEach((pos,i) => {{
-    const c=toCanvas(pos);
-    const isClicked=clicked.includes(i);
-    const orderIdx=clicked.indexOf(i);
-
-    // Halo
-    if(isClicked) {{
-      let grad=ctx.createRadialGradient(c.x,c.y,0,c.x,c.y,28);
-      grad.addColorStop(0,'rgba(180,140,255,0.35)');
-      grad.addColorStop(1,'rgba(0,0,0,0)');
-      ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(c.x,c.y,28,0,Math.PI*2); ctx.fill();
-    }}
-
-    // Étoile
-    drawStar(ctx, c.x, c.y, 14, 6, isClicked ? '#c39bd3' : '#6a6a9a', isClicked ? '#e8d5ff' : '#9a9ac0');
-
-    // Numéro
-    if(isClicked) {{
-      ctx.fillStyle='#1a1a2e'; ctx.font='bold 11px Georgia';
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(orderIdx+1, c.x, c.y);
-    }} else {{
-      ctx.fillStyle='#c0c0e0'; ctx.font='10px Georgia';
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(i+1, c.x, c.y);
-    }}
-  }});
-}}
-
-function drawStar(ctx,cx,cy,r,pts,fill,stroke) {{
-  ctx.beginPath();
-  for(let i=0;i<pts*2;i++) {{
-    let angle=Math.PI/pts*i - Math.PI/2;
-    let rad=i%2===0?r:r*0.45;
-    let x=cx+Math.cos(angle)*rad, y=cy+Math.sin(angle)*rad;
-    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
-  }}
-  ctx.closePath();
-  ctx.fillStyle=fill; ctx.fill();
-  ctx.strokeStyle=stroke; ctx.lineWidth=1.5; ctx.stroke();
-}}
-
-mainC.addEventListener('click', e => {{
-  if(finished) return;
-  const rect=mainC.getBoundingClientRect();
-  const scaleX=mainC.width/rect.width, scaleY=mainC.height/rect.height;
-  const mx=(e.clientX-rect.left)*scaleX, my=(e.clientY-rect.top)*scaleY;
-
-  POSITIONS.forEach((pos,i) => {{
-    const c=toCanvas(pos);
-    const dist=Math.sqrt((mx-c.x)**2+(my-c.y)**2);
-    if(dist<22 && !clicked.includes(i)) {{
-      clicked.push(i);
-      draw();
-      if(clicked.length===N) {{
-        finished=true;
-        document.getElementById('btn-valider').disabled=false;
-        document.getElementById('msg').textContent='✨ Chemin tracé — validez pour tenter l\'identification !';
-      }}
-    }}
-  }});
-}});
-
-document.getElementById('btn-reset').addEventListener('click', () => {{
-  clicked=[]; finished=false;
-  document.getElementById('btn-valider').disabled=true;
-  document.getElementById('msg').textContent='';
-  draw();
-}});
-
-document.getElementById('btn-valider').addEventListener('click', () => {{
-  // Vérif ordre correct (1,2,3,4,5 dans l'ordre des index)
-  const correct = [{order_str}];
-  const ok = clicked.every((v,i)=>v===correct[i]);
-  if(ok) {{
-    document.getElementById('msg').textContent='🌟 Ordre correct ! Résultat enregistré...';
-    document.getElementById('msg').style.color='#2ecc71';
-  }} else {{
-    document.getElementById('msg').textContent='❌ Mauvais ordre. Tentative comptabilisée.';
-    document.getElementById('msg').style.color='#e74c3c';
-  }}
-  setTimeout(()=>{{ window.sendPrompt(ok ? '/etudier_resultat {item_id} succes' : '/etudier_resultat {item_id} echec'); }}, 1200);
-}});
-
-window.addEventListener('resize', resize);
-resize();
-</script>
-"""
-
-    await interaction.response.send_message(
-        content=f"🔮 **Étude de l'artefact** — *{inv['nom'] if inv['identifie'] else '???'}*\n"
-                f"Progression : **{reussites}/3** réussite(s) — 1 tentative par 24h.",
-        embed=None
+    embed = discord.Embed(title="🔮 Étude de l'Artefact", color=0x9b59b6)
+    seq_display = " ".join(sequence_correcte)
+    embed.description = (
+        f"{rarete_em} **Objet inconnu** — Identification en cours...\n"
+        f"Progression : **{reussites}/3** réussite(s)\n\n"
+        f"**Cliquez les étoiles dans l'ordre** : 1→2→3→4→5\n"
+        f"Ordre correct : {seq_display}\n"
+        f"*(Mémorisez puis cliquez dans le même ordre !)*"
     )
-    # Envoyer via followup car l'artifact ne passe pas dans send_message standard
-    # On encode l'HTML dans un embed field pour Discord (limitation — on utilise send)
-    # Solution: stocker le pendinginfo et envoyer l'HTML via un embed description tronqué
-    # Ici on note la tentative et on renvoie le mini-jeu en ephemeral
-    await interaction.followup.send(content="*(Le mini-jeu s'affiche ci-dessous — cliquez les étoiles dans l'ordre, puis Valider)*", ephemeral=True)
+    embed.set_footer(text="Vous avez 90 secondes.")
 
-    # Enregistrer la tentative en cours
-    conn2 = get_db_connection()
-    if not prog:
-        conn2.execute("INSERT INTO etude_progress (user_id, inv_id, reussites, derniere_tentative) VALUES (?,?,0,?)",
-                      (user_id, item_id, now.isoformat()))
-    else:
-        conn2.execute("UPDATE etude_progress SET derniere_tentative=? WHERE user_id=? AND inv_id=?",
-                      (now.isoformat(), user_id, item_id))
-    conn2.commit(); conn2.close()
+    # Vue avec boutons
+    class EtudeView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=90)
+            self.clicks = []
+            self.seq_melangee = sequence_melangee
+            self.seq_correcte = sequence_correcte
+            self.item_id = item_id
+            self.user_id = user_id
+            self.reussites = reussites
+            self.done = False
+            # Ajouter boutons pour chaque étoile dans l'ordre mélangé
+            for idx, emoji in enumerate(sequence_melangee):
+                btn = discord.ui.Button(emoji=emoji, custom_id=f"star_{idx}", style=discord.ButtonStyle.secondary, row=0)
+                btn.callback = self.make_callback(idx, emoji)
+                self.add_item(btn)
+            # Bouton reset
+            reset_btn = discord.ui.Button(label="↺ Reset", style=discord.ButtonStyle.danger, custom_id="reset", row=1)
+            reset_btn.callback = self.reset_callback
+            self.add_item(reset_btn)
 
+        def make_callback(self, idx, emoji):
+            async def callback(interaction2: discord.Interaction):
+                if interaction2.user.id != self.user_id:
+                    return await interaction2.response.send_message("❌ Ce n'est pas votre étude.", ephemeral=True)
+                if self.done: return
+                if emoji in [self.seq_melangee[c] for c in self.clicks]:
+                    return await interaction2.response.defer()
+                self.clicks.append(idx)
+                clicked_emojis = [self.seq_melangee[c] for c in self.clicks]
+                status = " ".join(clicked_emojis) + " " + "◽" * (N - len(clicked_emojis))
+                if len(self.clicks) == N:
+                    self.done = True
+                    ok = (clicked_emojis == self.seq_correcte)
+                    await self.enregistrer(interaction2, ok)
+                else:
+                    embed2 = interaction2.message.embeds[0]
+                    embed2.set_field_at(0, name="Séquence saisie", value=status, inline=False) if embed2.fields else embed2.add_field(name="Séquence saisie", value=status, inline=False)
+                    await interaction2.response.edit_message(embed=embed2, view=self)
+            return callback
 
-@bot.tree.command(name="etudier_resultat", description="(Système) Enregistre le résultat d'une étude")
-@app_commands.describe(item_id="ID inventaire", resultat="succes ou echec")
-async def etudier_resultat(interaction: discord.Interaction, item_id: int, resultat: str):
-    import datetime as _dt
-    user_id = interaction.user.id
-    conn = get_db_connection()
+        async def reset_callback(self, interaction2: discord.Interaction):
+            if interaction2.user.id != self.user_id: return
+            self.clicks = []
+            embed2 = interaction2.message.embeds[0]
+            if embed2.fields:
+                embed2.clear_fields()
+            await interaction2.response.edit_message(embed=embed2, view=self)
 
-    inv = conn.execute("SELECT * FROM inventaire WHERE id=? AND user_id=?", (item_id, user_id)).fetchone()
-    if not inv:
-        conn.close()
-        return await interaction.response.send_message("❌ Item introuvable.", ephemeral=True)
+        async def enregistrer(self, interaction2, ok):
+            import datetime as _dt2
+            conn2 = get_db_connection()
+            now2 = _dt2.datetime.utcnow()
+            new_reussites = self.reussites + (1 if ok else 0)
+            if not prog:
+                conn2.execute("INSERT INTO etude_progress (user_id, inv_id, reussites, derniere_tentative) VALUES (?,?,?,?)",
+                              (self.user_id, self.item_id, new_reussites, now2.isoformat()))
+            else:
+                conn2.execute("UPDATE etude_progress SET reussites=?, derniere_tentative=? WHERE user_id=? AND inv_id=?",
+                              (new_reussites, now2.isoformat(), self.user_id, self.item_id))
 
-    prog = conn.execute("SELECT * FROM etude_progress WHERE user_id=? AND inv_id=?", (user_id, item_id)).fetchone()
-    reussites = (prog['reussites'] if prog else 0) + (1 if resultat == "succes" else 0)
+            for child in self.children:
+                child.disabled = True
 
-    if reussites >= 3:
-        # Item identifié !
-        conn.execute("UPDATE inventaire SET identifie=1 WHERE id=?", (item_id,))
-        conn.execute("UPDATE etude_progress SET reussites=3, identifie=1 WHERE user_id=? AND inv_id=?",
-                     (user_id, item_id))
-        conn.commit()
-        item = conn.execute("SELECT nom, description, rarete FROM config_items WHERE ref=?",
-                            (inv['item_ref'],)).fetchone()
-        conn.close()
-        RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
-        embed = discord.Embed(title="✨ Artefact Identifié !", color=0x9b59b6)
-        embed.description = (
-            f"Après vos études, l'objet révèle sa nature !\n\n"
-            f"**{item['nom']}** {RARETE_EMOJI.get(item['rarete'],'⚪')}\n"
-            f"*{item['description']}*\n\n"
-            f"Vous pouvez maintenant l'équiper avec `/equiper {item_id}`."
-        )
-        await interaction.response.send_message(embed=embed)
-    else:
-        conn.execute("UPDATE etude_progress SET reussites=? WHERE user_id=? AND inv_id=?",
-                     (reussites, user_id, item_id))
-        conn.commit(); conn.close()
-        if resultat == "succes":
-            await interaction.response.send_message(
-                f"✅ **Étude réussie !** Progression : **{reussites}/3**\n"
-                f"Revenez dans 24h pour la prochaine tentative.", ephemeral=True)
-        else:
-            await interaction.response.send_message(
-                f"❌ **Étude échouée.** Progression : **{reussites}/3**\n"
-                f"Revenez dans 24h pour réessayer.", ephemeral=True)
+            if new_reussites >= 3:
+                conn2.execute("UPDATE inventaire SET identifie=1 WHERE id=?", (self.item_id,))
+                conn2.commit()
+                item_row = conn2.execute("SELECT nom, description, rarete FROM config_items WHERE ref=?",
+                                         (inv['item_ref'],)).fetchone()
+                conn2.close()
+                RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
+                embed3 = discord.Embed(title="✨ Artefact Identifié !", color=0xf1c40f)
+                embed3.description = (
+                    f"**{item_row['nom']}** {RARETE_EMOJI.get(item_row['rarete'],'⚪')}\n"
+                    f"*{item_row['description']}*\n\n"
+                    f"Utilisez `/equiper {self.item_id}` pour l'équiper !"
+                )
+                await interaction2.response.edit_message(embed=embed3, view=self)
+            else:
+                conn2.commit(); conn2.close()
+                color = 0x2ecc71 if ok else 0xe74c3c
+                msg = f"✅ **Réussi !** Progression : **{new_reussites}/3**\nRevenez dans 24h." if ok else f"❌ **Raté.** Progression : **{new_reussites}/3**\nRevenez dans 24h."
+                embed3 = discord.Embed(title="🔮 Résultat de l'étude", color=color, description=msg)
+                await interaction2.response.edit_message(embed=embed3, view=self)
 
+    await interaction.response.send_message(embed=embed, view=EtudeView(), ephemeral=True)
 
-
-
-
-#-------------------------------------------------------------------------------------------------------------------------------------------
-#-------------------------------------------------------------------------------------------------------------------------------------------
-#-------------------------------------------------------------------------------------------------------------------------------------------
 #-------------------------------------------------------------------------------------------------------------------------------------------
 # --- COMMANDES DE DON ---
 #-------------------------------------------------------------------------------------------------------------------------------------------
