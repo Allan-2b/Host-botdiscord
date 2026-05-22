@@ -8304,6 +8304,9 @@ async def gm_backup(interaction: discord.Interaction):
     joueurs = conn.execute("SELECT * FROM joueurs").fetchall()
     inventaire = conn.execute("SELECT * FROM inventaire").fetchall()
     sessions = conn.execute("SELECT * FROM sessions").fetchall()
+    config_items = conn.execute("SELECT * FROM config_items").fetchall()
+    config_sets = conn.execute("SELECT * FROM config_sets").fetchall()
+    config_set_items = conn.execute("SELECT * FROM config_set_items").fetchall()
     conn.close()
 
     data = {
@@ -8311,13 +8314,16 @@ async def gm_backup(interaction: discord.Interaction):
         "joueurs": [dict(j) for j in joueurs],
         "inventaire": [dict(i) for i in inventaire],
         "sessions": [dict(s) for s in sessions],
+        "config_items": [dict(i) for i in config_items],
+        "config_sets": [dict(s) for s in config_sets],
+        "config_set_items": [dict(si) for si in config_set_items],
     }
 
     json_bytes = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
     file = discord.File(fp=__import__("io").BytesIO(json_bytes), filename=f"backup_{discord.utils.utcnow().strftime('%Y%m%d_%H%M')}.json")
 
     await interaction.followup.send(
-        f"✅ Backup exporté — **{len(data['joueurs'])}** personnages, **{len(data['inventaire'])}** items.",
+        f"✅ Backup exporté — **{len(data['joueurs'])}** personnages, **{len(data['inventaire'])}** items inventaire, **{len(data['config_items'])}** items config.",
         file=file,
         ephemeral=True
     )
@@ -8362,6 +8368,9 @@ async def gm_restore(interaction: discord.Interaction):
     joueurs_data = data.get("joueurs", [])
     inventaire_data = data.get("inventaire", [])
     sessions_data = data.get("sessions", [])
+    config_items_data = data.get("config_items", [])
+    config_sets_data = data.get("config_sets", [])
+    config_set_items_data = data.get("config_set_items", [])
 
     if not joueurs_data:
         return await interaction.followup.send("❌ Aucune donnée joueur trouvée dans le fichier.", ephemeral=True)
@@ -8370,6 +8379,8 @@ async def gm_restore(interaction: discord.Interaction):
     nb_joueurs = 0
     nb_inventaire = 0
     nb_sessions = 0
+    nb_items = 0
+    nb_sets = 0
     erreurs = []
 
     try:
@@ -8393,13 +8404,10 @@ async def gm_restore(interaction: discord.Interaction):
 
         for j in joueurs_data:
             try:
-                # Ne garder que les colonnes qu'on connaît
                 row = {k: j[k] for k in colonnes_joueurs if k in j}
-                # Valeurs par défaut pour colonnes manquantes
                 row.setdefault("badges", "[]")
                 row.setdefault("passe_count", 0)
                 row.setdefault("sentence_targets", "[]")
-
                 cols = ", ".join(row.keys())
                 placeholders = ", ".join(["?"] * len(row))
                 conn.execute(
@@ -8410,11 +8418,44 @@ async def gm_restore(interaction: discord.Interaction):
             except Exception as e:
                 erreurs.append(f"Joueur {j.get('nom', '?')} : {e}")
 
+        # Restaurer config_items (raretés, bonus_json, etc.)
+        for item in config_items_data:
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO config_items (ref, nom, slot, description, rarete, bonus_json, points_limite, necessite_etude) VALUES (?,?,?,?,?,?,?,?)",
+                    (item["ref"], item["nom"], item["slot"], item.get("description",""),
+                     item.get("rarete","commun"), item.get("bonus_json","{}"),
+                     item.get("points_limite",5), item.get("necessite_etude",0))
+                )
+                nb_items += 1
+            except Exception as e:
+                erreurs.append(f"Item {item.get('ref','?')} : {e}")
+
+        # Restaurer config_sets
+        for s in config_sets_data:
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO config_sets VALUES (?,?,?,?,?)",
+                    (s["set_ref"], s["nom"], s.get("description",""), s.get("bonus_2","{}"), s.get("bonus_4","{}"))
+                )
+                nb_sets += 1
+            except Exception as e:
+                erreurs.append(f"Set {s.get('set_ref','?')} : {e}")
+
+        # Restaurer config_set_items
+        for si in config_set_items_data:
+            try:
+                conn.execute("INSERT OR IGNORE INTO config_set_items VALUES (?,?)",
+                             (si["set_ref"], si["item_ref"]))
+            except Exception as e:
+                erreurs.append(f"SetItem : {e}")
+
+        # Restaurer inventaire avec colonne identifie
         for inv in inventaire_data:
             try:
                 conn.execute(
-                    "INSERT OR IGNORE INTO inventaire (user_id, item_ref, equipe) VALUES (?, ?, ?)",
-                    (inv["user_id"], inv["item_ref"], inv.get("equipe", 0))
+                    "INSERT OR IGNORE INTO inventaire (user_id, item_ref, equipe, identifie) VALUES (?,?,?,?)",
+                    (inv["user_id"], inv["item_ref"], inv.get("equipe", 0), inv.get("identifie", 1))
                 )
                 nb_inventaire += 1
             except Exception as e:
@@ -8441,7 +8482,9 @@ async def gm_restore(interaction: discord.Interaction):
     embed = discord.Embed(title="✅ Restore Terminé", color=0x2ecc71)
     embed.description = (
         f"**{nb_joueurs}** personnages restaurés\n"
-        f"**{nb_inventaire}** items restaurés\n"
+        f"**{nb_inventaire}** items d'inventaire restaurés\n"
+        f"**{nb_items}** config_items restaurés\n"
+        f"**{nb_sets}** sets restaurés\n"
         f"**{nb_sessions}** sessions restaurées"
         f"{msg_erreurs}"
     )
