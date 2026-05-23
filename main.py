@@ -6198,7 +6198,7 @@ async def inventaire(interaction: discord.Interaction):
         id_str = f"ID:{item['id']}"
 
         if not item['identifie'] and item['necessite_etude']:
-            ligne = f"• **???** {em_slot} *(Non identifié — /etudier {item['id']})* [{id_str}]\n"
+            ligne = f"• **???** {em_slot} *(Non identifié — `/etudier {item['id']}`)* [{id_str}]\n  *Description cachée jusqu'à identification complète.*\n"
         else:
             ligne = f"• **{item['nom']}** {em_rare}{em_slot} — {pts}pts [{id_str}]\n  *{item['description']}*\n"
 
@@ -6338,7 +6338,7 @@ async def equipement(interaction: discord.Interaction):
 
     conn = get_db_connection()
     items = conn.execute("""
-        SELECT i.id, c.ref, c.nom, c.slot, c.description, i.equipe
+        SELECT i.id, c.ref, c.nom, c.slot, c.description, i.equipe, i.identifie, c.necessite_etude
         FROM inventaire i
         JOIN config_items c ON i.item_ref = c.ref
         WHERE i.user_id = ?
@@ -6380,7 +6380,8 @@ async def equipement(interaction: discord.Interaction):
         equipes = data["equipes"]
         if equipes:
             for it in equipes:
-                slots_txt += f"{ico} **{slot_nom}** : {it['nom']} *(ID {it['id']})*\n"
+                nom_aff = "???" if (it['necessite_etude'] and not it['identifie']) else it['nom']
+                slots_txt += f"{ico} **{slot_nom}** : {nom_aff} *(ID {it['id']})*\n"
         else:
             slots_txt += f"{ico} **{slot_nom}** : *— vide —*\n"
 
@@ -6390,8 +6391,12 @@ async def equipement(interaction: discord.Interaction):
     if items_sac:
         sac_txt = ""
         for it in items_sac:
-            ico_sac = {"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵"}.get(it['slot'], "🔸")
-            sac_txt += f"{ico_sac} **{it['nom']}** *(ID {it['id']})* — {it['description']}\n"
+            ico_sac = {"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵",
+                       "chapeau":"🎩","gants":"🧤","bottes":"👢"}.get(it['slot'], "🔸")
+            if it['necessite_etude'] and not it['identifie']:
+                sac_txt += f"{ico_sac} **???** *(ID {it['id']})* — *Description cachée — `/etudier {it['id']}`*\n"
+            else:
+                sac_txt += f"{ico_sac} **{it['nom']}** *(ID {it['id']})* — {it['description']}\n"
         embed.add_field(name="🎒 Dans le sac", value=sac_txt, inline=False)
     else:
         embed.add_field(name="🎒 Dans le sac", value="*Vide.*", inline=False)
@@ -6404,10 +6409,11 @@ async def equipement(interaction: discord.Interaction):
             if items_sac:
                 options_equip = [
                     discord.SelectOption(
-                        label=f"{it['nom']} ({it['slot']})",
+                        label=f"{'???' if (it['necessite_etude'] and not it['identifie']) else it['nom']} ({it['slot']})",
                         value=str(it['id']),
-                        description=it['description'][:100] if it['description'] else "",
-                        emoji={"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵"}.get(it['slot'], "🔸")
+                        description="Non identifié — /etudier requis" if (it['necessite_etude'] and not it['identifie']) else (it['description'][:100] if it['description'] else ""),
+                        emoji={"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵",
+                               "chapeau":"🎩","gants":"🧤","bottes":"👢"}.get(it['slot'], "🔸")
                     )
                     for it in items_sac[:25]
                 ]
@@ -8492,12 +8498,12 @@ async def gm_restore(interaction: discord.Interaction):
             except Exception as e:
                 erreurs.append(f"SetItem : {e}")
 
-        # Restaurer inventaire avec colonne identifie
+        # Restaurer inventaire avec colonne identifie (INSERT OR REPLACE pour forcer la mise à jour)
         for inv in inventaire_data:
             try:
                 conn.execute(
-                    "INSERT OR IGNORE INTO inventaire (user_id, item_ref, equipe, identifie) VALUES (?,?,?,?)",
-                    (inv["user_id"], inv["item_ref"], inv.get("equipe", 0), inv.get("identifie", 1))
+                    "INSERT OR REPLACE INTO inventaire (id, user_id, item_ref, equipe, identifie) VALUES (?,?,?,?,?)",
+                    (inv.get("id"), inv["user_id"], inv["item_ref"], inv.get("equipe", 0), inv.get("identifie", 1))
                 )
                 nb_inventaire += 1
             except Exception as e:
