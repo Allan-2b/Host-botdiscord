@@ -7787,6 +7787,7 @@ async def gm_give_item(interaction: discord.Interaction, joueur: discord.Member,
 async def etudier(interaction: discord.Interaction, item_id: int):
     import datetime as _dt
     import random as _rnd
+    import asyncio as _asyncio
     user_id = interaction.user.id
     conn = get_db_connection()
 
@@ -7812,9 +7813,8 @@ async def etudier(interaction: discord.Interaction, item_id: int):
 
     if prog and prog['derniere_tentative']:
         last = _dt.datetime.fromisoformat(prog['derniere_tentative'])
-        diff = now - last
-        if diff.total_seconds() < 86400:
-            reste = 86400 - diff.total_seconds()
+        if (now - last).total_seconds() < 86400:
+            reste = 86400 - (now - last).total_seconds()
             h = int(reste // 3600); m = int((reste % 3600) // 60)
             conn.close()
             return await interaction.response.send_message(
@@ -7823,59 +7823,73 @@ async def etudier(interaction: discord.Interaction, item_id: int):
 
     reussites = prog['reussites'] if prog else 0
 
-    # Longueur selon rareté
-    RARETE_N = {"commun": 5, "peu_commun": 6, "rare": 7, "epique": 8, "legendaire": 9}
+    RARETE_N     = {"commun": 5, "peu_commun": 6, "rare": 7, "epique": 8, "legendaire": 9}
     RARETE_EMOJI = {"commun": "⚪", "peu_commun": "🟢", "rare": "🔵", "epique": "🟣", "legendaire": "🟠"}
-    N = RARETE_N.get(inv['rarete'], 5)
+    N         = RARETE_N.get(inv['rarete'], 5)
     rarete_em = RARETE_EMOJI.get(inv['rarete'], "⚪")
+    T_MEMO    = 15  # secondes pour mémoriser (toutes raretés)
 
-    # Pool 100% aléatoire à chaque appel — aucun seed reproductible
-    ALL_ETOILES = ["⭐", "🌟", "✨", "💫", "🌠", "🔮", "🌌", "⚡", "🔥"]
-    pool = ALL_ETOILES[:]
+    ALL = ["⭐", "🌟", "✨", "💫", "🌠", "🔮", "🌌", "⚡", "🔥"]
+    pool = ALL[:]
     _rnd.shuffle(pool)
-    sequence_correcte = pool[:N]
-    sequence_melangee = sequence_correcte[:]
-    while sequence_melangee == sequence_correcte and N > 1:
-        _rnd.shuffle(sequence_melangee)
-    _rnd.shuffle(sequence_melangee)
+    seq_correcte = pool[:N]
+    seq_melangee = seq_correcte[:]
+    while seq_melangee == seq_correcte and N > 1:
+        _rnd.shuffle(seq_melangee)
+    _rnd.shuffle(seq_melangee)
 
-    # Stocker la séquence en DB (anti-triche screenshot)
-    seq_str = ",".join(sequence_correcte)
+    seq_str = ",".join(seq_correcte)
     if not prog:
-        conn.execute(
-            "INSERT INTO etude_progress (user_id, inv_id, reussites, sequence_en_cours) VALUES (?,?,?,?)",
-            (user_id, item_id, reussites, seq_str))
+        conn.execute("INSERT INTO etude_progress (user_id, inv_id, reussites, sequence_en_cours) VALUES (?,?,?,?)",
+                     (user_id, item_id, reussites, seq_str))
     else:
-        conn.execute(
-            "UPDATE etude_progress SET sequence_en_cours=? WHERE user_id=? AND inv_id=?",
-            (seq_str, user_id, item_id))
+        conn.execute("UPDATE etude_progress SET sequence_en_cours=? WHERE user_id=? AND inv_id=?",
+                     (seq_str, user_id, item_id))
     conn.commit()
     conn.close()
 
-    seq_display = " ".join(sequence_correcte)
-    embed = discord.Embed(title="🔮 Étude de l'Artefact", color=0x9b59b6)
-    embed.description = (
+    seq_display = " ".join(seq_correcte)
+
+    def make_memo_embed(remaining):
+        e = discord.Embed(title="🔮 Étude de l'Artefact — Mémorisation", color=0x9b59b6)
+        e.description = (
+            f"{rarete_em} **Objet inconnu** — {inv['rarete'].replace('_', ' ').capitalize()}\n"
+            f"Progression : **{reussites}/3** réussite(s)\n\n"
+            f"**Mémorisez cette séquence !**\n"
+            f"┃ {seq_display} ┃\n\n"
+            f"⏱️ *Masquage dans **{remaining}s**...*"
+        )
+        return e
+
+    await interaction.response.send_message(embed=make_memo_embed(T_MEMO), ephemeral=True)
+
+    for remaining in range(T_MEMO - 1, 0, -1):
+        await _asyncio.sleep(1)
+        await interaction.edit_original_response(embed=make_memo_embed(remaining))
+
+    await _asyncio.sleep(1)
+
+    embed_jeu = discord.Embed(title="🔮 Étude de l'Artefact — Reproduction", color=0x9b59b6)
+    embed_jeu.description = (
         f"{rarete_em} **Objet inconnu** — {inv['rarete'].replace('_', ' ').capitalize()}\n"
         f"Progression : **{reussites}/3** réussite(s)\n\n"
-        f"**Mémorisez la séquence, puis reproduisez-la !**\n"
-        f"Séquence ({N} symboles) : {seq_display}\n\n"
-        f"*Elle disparaîtra au premier clic.*"
+        f"**Reproduisez la séquence dans l'ordre !**\n"
+        f"┃ {'❓ ' * N}┃"
     )
-    embed.set_footer(text="Vous avez 90 secondes.")
+    embed_jeu.set_footer(text="Vous avez 90 secondes.")
 
     class EtudeView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=90)
             self.clicks = []
-            self.seq_melangee = sequence_melangee
+            self.seq_melangee = seq_melangee
             self.N = N
             self.item_id = item_id
             self.user_id = user_id
             self.reussites = reussites
             self.done = False
-            self.sequence_masquee = False
 
-            for idx, emoji in enumerate(sequence_melangee):
+            for idx, emoji in enumerate(seq_melangee):
                 row_n = 0 if idx < 5 else 1
                 btn = discord.ui.Button(emoji=emoji, custom_id=f"star_{idx}",
                                         style=discord.ButtonStyle.secondary, row=row_n)
@@ -7888,67 +7902,53 @@ async def etudier(interaction: discord.Interaction, item_id: int):
             self.add_item(reset_btn)
 
         def make_callback(self, idx, emoji):
-            async def callback(interaction2: discord.Interaction):
-                if interaction2.user.id != self.user_id:
-                    return await interaction2.response.send_message("❌ Ce n'est pas votre étude.", ephemeral=True)
-                if self.done:
-                    return await interaction2.response.defer()
-                if idx in self.clicks:
-                    return await interaction2.response.defer()
+            async def callback(inter2: discord.Interaction):
+                if inter2.user.id != self.user_id:
+                    return await inter2.response.send_message("❌ Ce n'est pas votre étude.", ephemeral=True)
+                if self.done or idx in self.clicks:
+                    return await inter2.response.defer()
 
                 self.clicks.append(idx)
-                clicked_emojis = [self.seq_melangee[c] for c in self.clicks]
-                status = " ".join(clicked_emojis) + " " + "◽" * (self.N - len(clicked_emojis))
-
-                embed2 = interaction2.message.embeds[0]
-
-                # Masquer la séquence au premier clic
-                if not self.sequence_masquee:
-                    self.sequence_masquee = True
-                    embed2.description = (
-                        f"{rarete_em} **Objet inconnu** — {inv['rarete'].replace('_', ' ').capitalize()}\n"
-                        f"Progression : **{self.reussites}/3** réussite(s)\n\n"
-                        f"**Reproduisez la séquence !**\n"
-                        f"*(Séquence masquée — bonne chance !)*"
-                    )
-
-                if embed2.fields:
-                    embed2.set_field_at(0, name="Séquence saisie", value=status, inline=False)
-                else:
-                    embed2.add_field(name="Séquence saisie", value=status, inline=False)
+                clicked = [self.seq_melangee[c] for c in self.clicks]
+                status = " ".join(clicked) + " " + "◽" * (self.N - len(clicked))
+                emb2 = inter2.message.embeds[0]
+                emb2.description = (
+                    f"{rarete_em} **Objet inconnu** — {inv['rarete'].replace('_', ' ').capitalize()}\n"
+                    f"Progression : **{self.reussites}/3** réussite(s)\n\n"
+                    f"**Reproduisez la séquence dans l'ordre !**\n"
+                    f"┃ {status} ┃"
+                )
 
                 if len(self.clicks) == self.N:
                     self.done = True
-                    await self.enregistrer(interaction2, clicked_emojis, embed2)
+                    await self.enregistrer(inter2, clicked, emb2)
                 else:
-                    await interaction2.response.edit_message(embed=embed2, view=self)
+                    await inter2.response.edit_message(embed=emb2, view=self)
             return callback
 
-        async def reset_callback(self, interaction2: discord.Interaction):
-            if interaction2.user.id != self.user_id:
-                return
+        async def reset_callback(self, inter2: discord.Interaction):
+            if inter2.user.id != self.user_id: return
             self.clicks = []
-            embed2 = interaction2.message.embeds[0]
-            if embed2.fields:
-                embed2.clear_fields()
-            await interaction2.response.edit_message(embed=embed2, view=self)
+            emb2 = inter2.message.embeds[0]
+            emb2.description = (
+                f"{rarete_em} **Objet inconnu** — {inv['rarete'].replace('_', ' ').capitalize()}\n"
+                f"Progression : **{self.reussites}/3** réussite(s)\n\n"
+                f"**Reproduisez la séquence dans l'ordre !**\n"
+                f"┃ {'❓ ' * self.N}┃"
+            )
+            await inter2.response.edit_message(embed=emb2, view=self)
 
-        async def enregistrer(self, interaction2, clicked_emojis, embed2):
+        async def enregistrer(self, inter2, clicked, emb2):
             import datetime as _dt2
             conn2 = get_db_connection()
-            now2 = _dt2.datetime.utcnow()
-
-            # Séquence correcte lue depuis la DB — le joueur ne peut pas la connaître à l'avance
-            row = conn2.execute(
-                "SELECT sequence_en_cours FROM etude_progress WHERE user_id=? AND inv_id=?",
-                (self.user_id, self.item_id)).fetchone()
+            row = conn2.execute("SELECT sequence_en_cours FROM etude_progress WHERE user_id=? AND inv_id=?",
+                                (self.user_id, self.item_id)).fetchone()
             seq_db = row['sequence_en_cours'].split(",") if row and row['sequence_en_cours'] else []
-            ok = (clicked_emojis == seq_db)
-
+            ok = (clicked == seq_db)
             new_reussites = self.reussites + (1 if ok else 0)
             conn2.execute(
                 "UPDATE etude_progress SET reussites=?, derniere_tentative=?, sequence_en_cours=NULL WHERE user_id=? AND inv_id=?",
-                (new_reussites, now2.isoformat(), self.user_id, self.item_id))
+                (new_reussites, _dt2.datetime.utcnow().isoformat(), self.user_id, self.item_id))
 
             for child in self.children:
                 child.disabled = True
@@ -7956,31 +7956,29 @@ async def etudier(interaction: discord.Interaction, item_id: int):
             if new_reussites >= 3:
                 conn2.execute("UPDATE inventaire SET identifie=1 WHERE id=?", (self.item_id,))
                 conn2.commit()
-                item_row = conn2.execute(
-                    "SELECT nom, description, rarete FROM config_items WHERE ref=?",
-                    (inv['item_ref'],)).fetchone()
+                it = conn2.execute("SELECT nom, description, rarete FROM config_items WHERE ref=?",
+                                   (inv['item_ref'],)).fetchone()
                 conn2.close()
-                RARETE_EMOJI2 = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
-                embed3 = discord.Embed(title="✨ Artefact Identifié !", color=0xf1c40f)
-                embed3.description = (
-                    f"**{item_row['nom']}** {RARETE_EMOJI2.get(item_row['rarete'], '⚪')}\n"
-                    f"*{item_row['description']}*\n\n"
+                RE = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
+                emb3 = discord.Embed(title="✨ Artefact Identifié !", color=0xf1c40f)
+                emb3.description = (
+                    f"**{it['nom']}** {RE.get(it['rarete'],'⚪')}\n"
+                    f"*{it['description']}*\n\n"
                     f"Utilisez `/equiper {self.item_id}` pour l'équiper !"
                 )
-                await interaction2.response.edit_message(embed=embed3, view=self)
+                await inter2.response.edit_message(embed=emb3, view=self)
             else:
-                conn2.commit()
-                conn2.close()
-                color = 0x2ecc71 if ok else 0xe74c3c
-                titre = "✅ Étude réussie !" if ok else "❌ Étude échouée"
-                embed3 = discord.Embed(title=titre, color=color)
-                embed3.description = f"Progression : **{new_reussites}/3**\nRevenez dans 24h pour la prochaine tentative."
+                conn2.commit(); conn2.close()
+                emb3 = discord.Embed(
+                    title="✅ Étude réussie !" if ok else "❌ Étude échouée",
+                    color=0x2ecc71 if ok else 0xe74c3c)
+                emb3.description = f"Progression : **{new_reussites}/3**\nRevenez dans 24h."
                 if not ok:
-                    embed3.add_field(name="Séquence correcte", value=" ".join(seq_db), inline=False)
-                    embed3.add_field(name="Votre séquence", value=" ".join(clicked_emojis), inline=False)
-                await interaction2.response.edit_message(embed=embed3, view=self)
+                    emb3.add_field(name="Séquence correcte", value=" ".join(seq_db), inline=False)
+                    emb3.add_field(name="Votre séquence",    value=" ".join(clicked),  inline=False)
+                await inter2.response.edit_message(embed=emb3, view=self)
 
-    await interaction.response.send_message(embed=embed, view=EtudeView(), ephemeral=True)
+    await interaction.edit_original_response(embed=embed_jeu, view=EtudeView())
 
 #-------------------------------------------------------------------------------------------------------------------------------------------
 # --- COMMANDES DE DON ---
