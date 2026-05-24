@@ -8466,18 +8466,28 @@ async def gm_restore(interaction: discord.Interaction):
             except Exception as e:
                 erreurs.append(f"Joueur {j.get('nom', '?')} : {e}")
 
-        # Restaurer config_items (raretés, bonus_json, etc.)
+        # Restaurer config_items — insertion complète si nouveau, UPDATE partiel si existant (nom/desc jamais écrasés)
         for item in config_items_data:
             try:
-                conn.execute(
-                    "INSERT OR REPLACE INTO config_items (ref, nom, slot, description, rarete, bonus_json, points_limite, necessite_etude) VALUES (?,?,?,?,?,?,?,?)",
-                    (item["ref"], item["nom"], item["slot"], item.get("description",""),
-                     item.get("rarete","commun"), item.get("bonus_json","{}"),
-                     item.get("points_limite",5), item.get("necessite_etude",0))
-                )
+                existing = conn.execute("SELECT ref FROM config_items WHERE ref=?", (item["ref"],)).fetchone()
+                if existing:
+                    # Item déjà en DB : ne jamais écraser nom, slot, description
+                    conn.execute(
+                        "UPDATE config_items SET rarete=?, bonus_json=?, points_limite=?, necessite_etude=? WHERE ref=?",
+                        (item.get("rarete", "commun"), item.get("bonus_json", "{}"),
+                         item.get("points_limite", 5), item.get("necessite_etude", 0), item["ref"])
+                    )
+                else:
+                    # Nouvel item : insertion complète avec toutes les données
+                    conn.execute(
+                        "INSERT INTO config_items (ref, nom, slot, description, rarete, bonus_json, points_limite, necessite_etude) VALUES (?,?,?,?,?,?,?,?)",
+                        (item["ref"], item["nom"], item["slot"], item.get("description", ""),
+                         item.get("rarete", "commun"), item.get("bonus_json", "{}"),
+                         item.get("points_limite", 5), item.get("necessite_etude", 0))
+                    )
                 nb_items += 1
             except Exception as e:
-                erreurs.append(f"Item {item.get('ref','?')} : {e}")
+                erreurs.append(f"Item {item.get('ref', '?')} : {e}")
 
         # Restaurer config_sets
         for s in config_sets_data:
