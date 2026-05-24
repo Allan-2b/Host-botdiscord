@@ -6186,7 +6186,7 @@ async def inventaire(interaction: discord.Interaction):
     SLOT_ICONES = {"arme":"⚔️","collier":"📿","anneau":"💍","armure":"🛡️","cape":"🧥","ceinture":"🧵",
                    "chapeau":"🎩","gants":"🧤","bottes":"👢"}
 
-    pts_max = (p.niveau * 5) if p else 0
+    pts_max = (p.niveau * 10) if p else 0
     pts_util = 0
     txt_equip = ""
     txt_sac = ""
@@ -6213,7 +6213,7 @@ async def inventaire(interaction: discord.Interaction):
     embed.add_field(name="🎒 Dans le sac", value=txt_sac or "Vide.", inline=False)
     if p:
         barre = "█" * int((pts_util/pts_max)*10) + "░" * (10-int((pts_util/pts_max)*10)) if pts_max else "░"*10
-        embed.add_field(name="⚖️ Jauge de Limite", value=f"`{barre}` **{pts_util}/{pts_max}** pts (Niv.{p.niveau}×5)", inline=False)
+        embed.add_field(name="⚖️ Jauge de Limite", value=f"`{barre}` **{pts_util}/{pts_max}** pts (Niv.{p.niveau}×10)", inline=False)
     embed.set_footer(text="/equiper [ID] • /desequiper [ID] • /etudier [ID]")
     await interaction.response.send_message(embed=embed)
 
@@ -6252,7 +6252,7 @@ async def equiper(interaction: discord.Interaction, item_id: int):
     # Vérif limite de points
     RARETE_POINTS = {"commun": 5, "peu_commun": 10, "rare": 15, "epique": 25, "legendaire": 40}
     pts_item = target['points_limite'] or RARETE_POINTS.get(target['rarete'], 5)
-    pts_max = p.niveau * 5
+    pts_max = p.niveau * 10
 
     # Calculer les points déjà utilisés
     equipes = conn.execute('''
@@ -6267,7 +6267,7 @@ async def equiper(interaction: discord.Interaction, item_id: int):
         RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
         return await interaction.response.send_message(
             f"⚠️ **Limite d'équipement atteinte !**\n"
-            f"Jauge : **{pts_utilises}/{pts_max}** pts (niveau {p.niveau} × 5)\n"
+            f"Jauge : **{pts_utilises}/{pts_max}** pts (niveau {p.niveau} × 10)\n"
             f"Cet item coûte **{pts_item} pts** {RARETE_EMOJI.get(target['rarete'],'⚪')} — il vous manque {pts_item-(pts_max-pts_utilises)} pts.",
             ephemeral=True)
 
@@ -7829,11 +7829,11 @@ async def etudier(interaction: discord.Interaction, item_id: int):
 
     reussites = prog['reussites'] if prog else 0
 
-    RARETE_N     = {"commun": 5, "peu_commun": 6, "rare": 7, "epique": 8, "legendaire": 9}
+    RARETE_N     = {"commun": 4, "peu_commun": 5, "rare": 6, "epique": 7, "legendaire": 8}
     RARETE_EMOJI = {"commun": "⚪", "peu_commun": "🟢", "rare": "🔵", "epique": "🟣", "legendaire": "🟠"}
     N         = RARETE_N.get(inv['rarete'], 5)
     rarete_em = RARETE_EMOJI.get(inv['rarete'], "⚪")
-    T_MEMO    = 15  # secondes pour mémoriser (toutes raretés)
+    T_MEMO    = 20  # secondes pour mémoriser (toutes raretés)
 
     ALL = ["⭐", "🌟", "✨", "💫", "🌠", "🔮", "🌌", "⚡", "🔥"]
     pool = ALL[:]
