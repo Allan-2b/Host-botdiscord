@@ -790,7 +790,7 @@ def populate_spells():
         ("ombre_paralysie_avance","Paralysie Neurale Avancée",     '["loge_ombre"]', 4, 4, 11, 4, 4, "esp", 18, "mana", 0, 4, "Coupe les connexions motrices supérieures.", "actif", "spe", '{"seuil": 3, "status": {"stun": 2}, "ignore_rob_si_designation": true}'),        ("ombre_extraction",      "Extraction d'Information (Bonus)",'["loge_ombre"]', 4, 4, 0, 4, 0, "esp", 15, "mana", 0, 3, "Plonge dans les souvenirs d'une cible inconsciente.", "utilitaire", "spe", '{"rp_effect": "Accède aux souvenirs récents d\'une cible inconsciente. MJ révèle 3 infos."}'),
         ("ombre_poudre",          "Poudre d'Oubli (Bonus)",        '["loge_ombre"]', 4, 4, 0, 4, 0, "esp", 20, "mana", 0, 4, "6 PNJ oublient la Confrérie agir en 10min.", "utilitaire", "spe", '{"rp_effect": "Jusqu\'à 6 PNJ oublient avoir vu la Confrérie agir dans les 10 dernières minutes."}'),
         # P5
-        ("ombre_execution",       "Exécution de l'Ombre",          '["loge_ombre"]', 5, 5, 22, 5, 7, "esp", 30, "mana", 0, 3, "La Confrérie a jugé. Dégâts massifs ignorant toute défense.", "actif", "spe", '{"requiert_designation": true, "ignore_armor": true, "ignore_rob": true, "seuil": 3, "execute_note": true}'),        ("ombre_sentence_avance", "Sentence Létale Avancée",       '["loge_ombre"]', 5, 5, 18, 5, 8, "esp", 35, "mana", 0, 3, "Le Grand Régulateur n'a pas besoin de deux balles.", "actif", "spe", '{"requiert_designation": true, "ignore_armor": true, "seuil": 3, "execute_percent_si_designation": 30}'),        ("ombre_marquage_fantome","Marquage Fantôme",               '["loge_ombre"]', 5, 5, 4, 3, 2, "esp", 12, "mana", 0, 2, "Pose Désignation après un kill.", "actif", "spe", '{"pose_designation": 1, "seuil": 1}'),        ("ombre_disparition",     "Disparition Totale (Bonus)",    '["loge_ombre"]', 5, 5, 0, 5, 0, "esp", 35, "mana", 0, 6, "Vous et votre groupe introuvables 24h.", "utilitaire", "spe", '{"rp_effect": "Vous et votre groupe êtes introuvables pendant 24h. Aucun sort de localisation."}'),
+        ("ombre_execution",       "Exécution de l'Ombre",          '["loge_ombre"]', 5, 5, 22, 5, 7, "esp", 30, "mana", 0, 3, "La Confrérie a jugé. Dégâts massifs ignorant toute défense.", "actif", "spe", '{"requiert_designation": true, "ignore_armor": true, "ignore_rob": true, "seuil": 3, "execute_note": true}'),        ("ombre_sentence_avance", "Sentence Létale Avancée",       '["loge_ombre"]', 5, 5, 18, 5, 8, "esp", 35, "mana", 0, 3, "Le Grand Régulateur n'a pas besoin de deux balles.", "actif", "spe", '{"requiert_designation": true, "ignore_armor": true, "seuil": 3, "execute_percent_si_designation": 30}'),        ("ombre_marquage_fantome","Marquage Fantôme (Bonus)",        '["loge_ombre"]', 5, 5, 4, 3, 2, "esp", 0, "mana", 0, 2, "Pose Désignation directement sur la prochaine cible, sans riposte possible.", "utilitaire", "spe", '{"pose_designation_direct": 1, "seuil": 0}'),        ("ombre_disparition",     "Disparition Totale (Bonus)",    '["loge_ombre"]', 5, 5, 0, 5, 0, "esp", 35, "mana", 0, 6, "Vous et votre groupe introuvables 24h.", "utilitaire", "spe", '{"rp_effect": "Vous et votre groupe êtes introuvables pendant 24h. Aucun sort de localisation."}'),
         ("ombre_manipulation",    "Manipulation Absolue (Bonus)",  '["loge_ombre"]', 5, 5, 0, 6, 0, "esp", 40, "mana", 0, 6, "Ordre post-hypnotique complexe sur un PNJ.", "utilitaire", "spe", '{"rp_effect": "Ordre post-hypnotique complexe déclenché par une condition précise sur un PNJ."}'),
 
         # ====================================================================================
@@ -2167,6 +2167,12 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         attaquant.designation_stacks = nb_stacks_d
         label_d = "double" if nb_stacks_d >= 2 else "simple"
         msg.append(f"🎯 **Désignation ({label_d})** posée sur {getattr(defenseur, 'nom', 'cible')} !")
+
+    # -- DÉSIGNATION DIRECTE (Marquage Fantôme P5 — sans riposte adverse) --
+    if "pose_designation_direct" in data and defenseur:
+        attaquant.designation_target_id = defenseur.user_id
+        attaquant.designation_stacks = data["pose_designation_direct"]
+        msg.append(f"🎯👻 **Marquage Fantôme** : {getattr(defenseur, 'nom', 'cible')} est Désigné(e) instantanément — aucune riposte possible !")
 
     # -- POSE PASSE (ÉCOLE DE L'ESTOC) --
     if data.get("pose_passe"):
@@ -6685,6 +6691,12 @@ async def apprendre(interaction: discord.Interaction, competence: str):
         if passif_a_donner and passif_a_donner not in p.competences:
             p.competences.append(passif_a_donner)
             msg_bonus = f"\n🎁 **Passif offert :** {SKILLS_DB[passif_a_donner]['nom']}."
+
+        # Sort bonus automatique Pallier 5 : Marquage Fantôme (Loge de l'Ombre)
+        if nom_arbre == "loge_ombre" and pallier_vise == 5:
+            if "ombre_marquage_fantome" not in p.competences:
+                p.competences.append("ombre_marquage_fantome")
+                msg_bonus += f"\n🎁 **Sort offert :** {SKILLS_DB['ombre_marquage_fantome']['nom']} — disponible dans `/action_bonus`."
 
     p.sauvegarder()
     await interaction.response.send_message(f"✅ **{skill['nom']}** (P{pallier_vise}) appris !{msg_bonus}")
