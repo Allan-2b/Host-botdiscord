@@ -8590,5 +8590,3 @@ if __name__ == "__main__":
         bot.run(token, log_handler=handler, log_level=logging.DEBUG)
     else:
         print("ERREUR : Le token est vide ou le fichier .env est mal placé.")
-    else:
-        print("ERREUR : Le token est vide ou le fichier .env est mal placé.")
