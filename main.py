@@ -141,8 +141,10 @@ def init_db():
             set_ref TEXT PRIMARY KEY,
             nom TEXT,
             description TEXT,
-            bonus_2 TEXT DEFAULT '{}',
-            bonus_4 TEXT DEFAULT '{}'
+            has_bonus_2 INTEGER DEFAULT 0,
+            has_bonus_4 INTEGER DEFAULT 0,
+            desc_bonus_2 TEXT DEFAULT '',
+            desc_bonus_4 TEXT DEFAULT ''
         )
     ''')
     conn.execute('''
@@ -1399,24 +1401,7 @@ class Personnage:
             except Exception:
                 pass
 
-        # Appliquer bonus de sets
-        refs_equipes = {row['item_ref'] for row in rows if row['identifie']}
-        tous_sets = conn.execute("SELECT * FROM config_sets").fetchall()
-        for s in tous_sets:
-            items_set = conn.execute("SELECT item_ref FROM config_set_items WHERE set_ref=?",
-                                     (s['set_ref'],)).fetchall()
-            refs_set = [r['item_ref'] for r in items_set]
-            count = sum(1 for r in refs_set if r in refs_equipes)
-            for pieces, bonus_col in [(2, 'bonus_2'), (4, 'bonus_4')]:
-                if count >= pieces:
-                    try:
-                        bj = json.loads(s[bonus_col] or '{}')
-                        for key, val in bj.items():
-                            attr = BONUS_MAP.get(key, key)
-                            if hasattr(self, attr):
-                                setattr(self, attr, getattr(self, attr, 0) + val)
-                    except Exception:
-                        pass
+        # Bonus de sets : descriptions texte uniquement, pas de bonus mécanique automatique
         conn.close()
 
 
@@ -7629,13 +7614,30 @@ async def gm_delete_spe(interaction: discord.Interaction, nom: str):
 
 # --- COMMANDES ITEMS (GM) ---
 
+# Autocomplétion items
+async def item_autocomplete(interaction: discord.Interaction, current: str):
+    conn = get_db_connection()
+    rows = conn.execute("SELECT nom, ref FROM config_items WHERE nom LIKE ?", (f"%{current}%",)).fetchall()
+    conn.close()
+    return [app_commands.Choice(name=r['nom'], value=r['ref']) for r in rows][:25]
+
+# Autocomplétion sets (avec option "Aucun set")
+async def set_autocomplete(interaction: discord.Interaction, current: str):
+    conn = get_db_connection()
+    rows = conn.execute("SELECT nom, set_ref FROM config_sets WHERE nom LIKE ?", (f"%{current}%",)).fetchall()
+    conn.close()
+    choices = [app_commands.Choice(name="— Aucun set —", value="none")]
+    choices += [app_commands.Choice(name=r['nom'], value=r['set_ref']) for r in rows]
+    return choices[:25]
+
 @bot.tree.command(name="gm_creer_item", description="(GM) Créer un objet")
 @app_commands.describe(
     ref="Code unique (ex: epee_fer)", nom="Nom affiché",
     description="Description des effets",
     rarete="Rareté de l'objet",
     bonus_json='Bonus JSON (ex: {"pv_max":5,"mana_max":10,"phy":1})',
-    necessite_etude="L'objet doit-il être étudié avant de fonctionner ?"
+    necessite_etude="L'objet doit-il être étudié avant de fonctionner ?",
+    set_ref="(Optionnel) Associer directement à un set existant"
 )
 @app_commands.choices(slot=[
     app_commands.Choice(name="⚔️ Arme",             value="arme"),
@@ -7654,8 +7656,10 @@ async def gm_delete_spe(interaction: discord.Interaction, nom: str):
     app_commands.Choice(name="🟣 Épique (25 pts)",      value="epique"),
     app_commands.Choice(name="🟠 Légendaire (40 pts)",  value="legendaire"),
 ])
+@app_commands.autocomplete(set_ref=set_autocomplete)
 async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, slot: app_commands.Choice[str], description: str,
-                        rarete: app_commands.Choice[str] = None, bonus_json: str = '{}', necessite_etude: bool = False):
+                        rarete: app_commands.Choice[str] = None, bonus_json: str = '{}',
+                        necessite_etude: bool = False, set_ref: str = None):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
@@ -7663,77 +7667,86 @@ async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, sl
     RARETE_POINTS = {"commun": 5, "peu_commun": 10, "rare": 15, "epique": 25, "legendaire": 40}
     pts = RARETE_POINTS.get(rarete_val, 5)
 
-    # Valider bonus_json
     try:
         json.loads(bonus_json)
     except Exception:
-        return await interaction.response.send_message("❌ `bonus_json` invalide. Ex: `{\"pv_max\":5,\"mana_max\":10}`", ephemeral=True)
+        return await interaction.response.send_message('❌ `bonus_json` invalide. Ex: `{"pv_max":5,"mana_max":10}`', ephemeral=True)
 
+    ref_clean = ref.lower()
     conn = get_db_connection()
     try:
         conn.execute(
             "INSERT OR REPLACE INTO config_items (ref, nom, slot, description, rarete, bonus_json, points_limite, necessite_etude) VALUES (?,?,?,?,?,?,?,?)",
-            (ref.lower(), nom, slot.value, description, rarete_val, bonus_json, pts, 1 if necessite_etude else 0)
+            (ref_clean, nom, slot.value, description, rarete_val, bonus_json, pts, 1 if necessite_etude else 0)
         )
+        set_msg = ""
+        if set_ref and set_ref != "none":
+            s = conn.execute("SELECT nom FROM config_sets WHERE set_ref=?", (set_ref,)).fetchone()
+            if s:
+                conn.execute("INSERT OR IGNORE INTO config_set_items VALUES (?,?)", (set_ref, ref_clean))
+                set_msg = f"\n🔮 Ajouté au set **{s['nom']}**."
+            else:
+                set_msg = "\n⚠️ Set introuvable, item créé sans association."
         conn.commit()
         RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
         emoji = RARETE_EMOJI.get(rarete_val, "⚪")
         etude_str = " *(Requiert étude)*" if necessite_etude else ""
         await interaction.response.send_message(
             f"✅ **{nom}** créé ! {emoji} {rarete_val.replace('_',' ').capitalize()} — {pts} pts de limite{etude_str}\n"
-            f"*Slot : {slot.name} | Bonus : `{bonus_json}`*"
+            f"*Slot : {slot.name} | Bonus : `{bonus_json}`*{set_msg}"
         )
     except Exception as e:
         await interaction.response.send_message(f"❌ Erreur : {e}", ephemeral=True)
     finally:
         conn.close()
 
-# Autocomplétion pour faciliter le don d'item
-async def item_autocomplete(interaction: discord.Interaction, current: str):
-    conn = get_db_connection()
-    rows = conn.execute("SELECT nom, ref FROM config_items WHERE nom LIKE ?", (f"%{current}%",)).fetchall()
-    conn.close()
-    return [app_commands.Choice(name=r['nom'], value=r['ref']) for r in rows][:25]
-
-async def set_autocomplete(interaction: discord.Interaction, current: str):
-    conn = get_db_connection()
-    rows = conn.execute("SELECT nom, set_ref FROM config_sets WHERE nom LIKE ?", (f"%{current}%",)).fetchall()
-    conn.close()
-    return [app_commands.Choice(name=r['nom'], value=r['set_ref']) for r in rows][:25]
-
-@bot.tree.command(name="gm_creer_set", description="(GM) Créer un set d'items avec bonus par pièces équipées")
+@bot.tree.command(name="gm_creer_set", description="(GM) Créer un set d'équipement")
 @app_commands.describe(
     set_ref="Code unique du set (ex: set_ombre)",
     nom="Nom affiché du set",
-    description="Description narrative",
-    bonus_2='Bonus à 2 pièces JSON (ex: {"mana_max":10,"phy":1})',
-    bonus_4='Bonus à 4 pièces JSON (ex: {"pv_max":20,"bonus_base_item":2})'
+    description="Description narrative du set",
+    bonus_2_pieces="Ce set a-t-il un bonus à 2 pièces ?",
+    bonus_4_pieces="Ce set a-t-il un bonus à 4 pièces ?",
+    desc_bonus_2="Description du bonus 2 pièces (ex: +10 Mana Max, +1 ESP)",
+    desc_bonus_4="Description du bonus 4 pièces (ex: +20 PV Max, +2 Dégâts de base)"
 )
 async def gm_creer_set(interaction: discord.Interaction, set_ref: str, nom: str, description: str,
-                       bonus_2: str = '{}', bonus_4: str = '{}'):
+                       bonus_2_pieces: bool = False, bonus_4_pieces: bool = False,
+                       desc_bonus_2: str = "", desc_bonus_4: str = ""):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
-    try:
-        json.loads(bonus_2); json.loads(bonus_4)
-    except:
-        return await interaction.response.send_message("❌ JSON invalide dans les bonus.", ephemeral=True)
+    if bonus_2_pieces and not desc_bonus_2.strip():
+        return await interaction.response.send_message("❌ Bonus 2 pièces activé mais description manquante.", ephemeral=True)
+    if bonus_4_pieces and not desc_bonus_4.strip():
+        return await interaction.response.send_message("❌ Bonus 4 pièces activé mais description manquante.", ephemeral=True)
 
     conn = get_db_connection()
-    conn.execute("INSERT OR REPLACE INTO config_sets VALUES (?,?,?,?,?)",
-                 (set_ref.lower(), nom, description, bonus_2, bonus_4))
-    conn.commit(); conn.close()
-    await interaction.response.send_message(
-        f"✅ Set **{nom}** créé !\n"
-        f"• 2 pièces : `{bonus_2}`\n"
-        f"• 4 pièces : `{bonus_4}`"
+    conn.execute(
+        "INSERT OR REPLACE INTO config_sets (set_ref, nom, description, has_bonus_2, has_bonus_4, desc_bonus_2, desc_bonus_4) VALUES (?,?,?,?,?,?,?)",
+        (set_ref.lower(), nom, description,
+         1 if bonus_2_pieces else 0, 1 if bonus_4_pieces else 0,
+         desc_bonus_2.strip() if bonus_2_pieces else "",
+         desc_bonus_4.strip() if bonus_4_pieces else "")
     )
+    conn.commit(); conn.close()
 
-@bot.tree.command(name="gm_ajouter_set_item", description="(GM) Associer un item à un set")
-@app_commands.describe(set_ref="Ref du set", item_ref="Ref de l'item")
+    lignes = [f"✅ Set **{nom}** créé !", f"*{description}*"]
+    if bonus_2_pieces:
+        lignes.append(f"• **2 pièces :** {desc_bonus_2}")
+    if bonus_4_pieces:
+        lignes.append(f"• **4 pièces :** {desc_bonus_4}")
+    if not bonus_2_pieces and not bonus_4_pieces:
+        lignes.append("*(Aucun bonus de pièces configuré)*")
+    await interaction.response.send_message("\n".join(lignes))
+
+@bot.tree.command(name="gm_ajouter_set_item", description="(GM) Associer un item existant à un set")
+@app_commands.describe(set_ref="Set cible", item_ref="Item à associer")
 @app_commands.autocomplete(set_ref=set_autocomplete, item_ref=item_autocomplete)
 async def gm_ajouter_set_item(interaction: discord.Interaction, set_ref: str, item_ref: str):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+    if set_ref == "none":
+        return await interaction.response.send_message("❌ Veuillez sélectionner un set valide.", ephemeral=True)
     conn = get_db_connection()
     s = conn.execute("SELECT nom FROM config_sets WHERE set_ref=?", (set_ref,)).fetchone()
     it = conn.execute("SELECT nom FROM config_items WHERE ref=?", (item_ref,)).fetchone()
@@ -8511,8 +8524,10 @@ async def gm_restore(interaction: discord.Interaction):
         for s in config_sets_data:
             try:
                 conn.execute(
-                    "INSERT OR REPLACE INTO config_sets VALUES (?,?,?,?,?)",
-                    (s["set_ref"], s["nom"], s.get("description",""), s.get("bonus_2","{}"), s.get("bonus_4","{}"))
+                    "INSERT OR REPLACE INTO config_sets (set_ref, nom, description, has_bonus_2, has_bonus_4, desc_bonus_2, desc_bonus_4) VALUES (?,?,?,?,?,?,?)",
+                    (s["set_ref"], s["nom"], s.get("description",""),
+                     s.get("has_bonus_2", 0), s.get("has_bonus_4", 0),
+                     s.get("desc_bonus_2",""), s.get("desc_bonus_4",""))
                 )
                 nb_sets += 1
             except Exception as e:
