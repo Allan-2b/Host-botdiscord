@@ -7744,14 +7744,21 @@ async def gm_ajouter_set_item(interaction: discord.Interaction, set_ref: str, it
     conn.commit(); conn.close()
     await interaction.response.send_message(f"✅ **{it['nom']}** ajouté au set **{s['nom']}**.")
 
-@bot.tree.command(name="sets", description="Voir les sets actifs sur votre personnage")
+@bot.tree.command(name="sets", description="Voir les sets liés aux items que vous possédez")
 async def sets(interaction: discord.Interaction):
     user_id = interaction.user.id
     conn = get_db_connection()
-    # Récupérer les items équipés et identifiés
-    equipes = conn.execute('''
-        SELECT i.item_ref FROM inventaire i WHERE i.user_id=? AND i.equipe=1 AND i.identifie=1
-    ''', (user_id,)).fetchall()
+
+    # Tous les items en possession (équipés ou non, identifiés ou non)
+    possedes = conn.execute(
+        "SELECT item_ref FROM inventaire WHERE user_id=?", (user_id,)
+    ).fetchall()
+    refs_possedes = {r['item_ref'] for r in possedes}
+
+    # Items équipés et identifiés (pour savoir lesquels activent les bonus)
+    equipes = conn.execute(
+        "SELECT item_ref FROM inventaire WHERE user_id=? AND equipe=1 AND identifie=1", (user_id,)
+    ).fetchall()
     refs_equipes = {r['item_ref'] for r in equipes}
 
     tous_sets = conn.execute("SELECT * FROM config_sets").fetchall()
@@ -7760,20 +7767,28 @@ async def sets(interaction: discord.Interaction):
     for s in tous_sets:
         items_set = conn.execute("SELECT item_ref FROM config_set_items WHERE set_ref=?", (s['set_ref'],)).fetchall()
         refs_set = [r['item_ref'] for r in items_set]
-        count = sum(1 for r in refs_set if r in refs_equipes)
-        if count == 0: continue
+
+        # N'afficher que si le joueur possède au moins 1 pièce du set
+        count_possede = sum(1 for r in refs_set if r in refs_possedes)
+        if count_possede == 0:
+            continue
+
         found = True
-        actif_2 = count >= 2
-        actif_4 = count >= 4
-        b2 = json.loads(s['bonus_2']) if s['bonus_2'] else {}
-        b4 = json.loads(s['bonus_4']) if s['bonus_4'] else {}
-        txt = f"*{s['description']}*\n**Pièces équipées : {count}/{len(refs_set)}**\n"
-        if b2: txt += f"{'✅' if actif_2 else '⬜'} 2 pièces : {', '.join(f'+{v} {k}' for k,v in b2.items())}\n"
-        if b4: txt += f"{'✅' if actif_4 else '⬜'} 4 pièces : {', '.join(f'+{v} {k}' for k,v in b4.items())}\n"
+        count_equipe = sum(1 for r in refs_set if r in refs_equipes)
+        actif_2 = count_equipe >= 2
+        actif_4 = count_equipe >= 4
+
+        txt = f"*{s['description']}*\n"
+        txt += f"**Possédées : {count_possede}/{len(refs_set)} | Équipées : {count_equipe}/{len(refs_set)}**\n"
+        if s['has_bonus_2'] and s['desc_bonus_2']:
+            txt += f"{'✅' if actif_2 else '⬜'} **2 pièces :** {s['desc_bonus_2']}\n"
+        if s['has_bonus_4'] and s['desc_bonus_4']:
+            txt += f"{'✅' if actif_4 else '⬜'} **4 pièces :** {s['desc_bonus_4']}\n"
         embed.add_field(name=f"{'🟣' if actif_2 else '⬜'} {s['nom']}", value=txt, inline=False)
+
     conn.close()
     if not found:
-        embed.description = "Aucun set actif sur votre personnage."
+        embed.description = "Vous ne possédez aucun item appartenant à un set."
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="gm_give_item", description="(GM) Donner un objet à un joueur")
