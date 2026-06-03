@@ -6993,12 +6993,14 @@ async def gm_add_boss_skill(interaction: discord.Interaction, nom: str, descript
 
 @bot.tree.command(name="gm_freestyle", description="(GM) Créer une attaque sur mesure et l'ajouter à un personnage")
 @app_commands.describe(
-    nom="Nom de l'attaque (ex: Souffle Ardent)", 
-    description="Narration", 
-    base="Dégâts de base", pieces="Nombre de dés", bonus="Dégâts par dé", 
+    nom="Nom de l'attaque (ex: Souffle Ardent)",
+    description="Narration",
+    base="Dégâts de base", pieces="Nombre de dés", bonus="Dégâts par dé",
     stat="Stat utilisée",
-    effet_type="Ajouter un statut spécial à l'attaque ?",
-    effet_val="Puissance de l'effet (ex: 2 pour Brûlure 2)",
+    effet_type="Premier effet sur la cible",
+    effet_val="Durée du 1er effet (tours, défaut: 1)",
+    effet_type2="Deuxième effet sur la cible (optionnel)",
+    effet_val2="Durée du 2ème effet (tours, défaut: 1)",
     zone="L'attaque touche-t-elle plusieurs personnes (AoE) ?",
     cooldown_tours="Cooldown en tours de combat (0 = aucun)",
     cible_fiche="[Optionnel] Donner le sort à une fiche spécifique (sinon : votre personnage actif)",
@@ -7016,17 +7018,30 @@ async def gm_add_boss_skill(interaction: discord.Interaction, nom: str, descript
     app_commands.Choice(name="🩸 Hémorragie", value="hemorragie"),
     app_commands.Choice(name="💫 Étourdissement", value="stun"),
     app_commands.Choice(name="🌳 Enracinement", value="root"),
-    app_commands.Choice(name="🦴 Mutilation", value="mutilation")
+    app_commands.Choice(name="🦴 Mutilation", value="mutilation"),
+    app_commands.Choice(name="❄️ Gel", value="gel"),
+    app_commands.Choice(name="☣️ Corruption", value="corruption"),
+], effet_type2=[
+    app_commands.Choice(name="🔥 Brûlure", value="brulure"),
+    app_commands.Choice(name="☠️ Poison", value="poison"),
+    app_commands.Choice(name="🩸 Hémorragie", value="hemorragie"),
+    app_commands.Choice(name="💫 Étourdissement", value="stun"),
+    app_commands.Choice(name="🌳 Enracinement", value="root"),
+    app_commands.Choice(name="🦴 Mutilation", value="mutilation"),
+    app_commands.Choice(name="❄️ Gel", value="gel"),
+    app_commands.Choice(name="☣️ Corruption", value="corruption"),
 ], type_sort=[
     app_commands.Choice(name="⚔️ Actif (apparaît dans /attaque et /clash)", value="actif"),
     app_commands.Choice(name="⚡ Bonus (apparaît dans /action_bonus)", value="bonus"),
 ])
 @app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
 async def gm_freestyle(
-    interaction: discord.Interaction, 
-    nom: str, description: str, base: int, pieces: int, bonus: int, 
-    stat: app_commands.Choice[str], 
-    effet_type: app_commands.Choice[str] = None, effet_val: int = 1, zone: bool = False, cooldown_tours: int = 0,
+    interaction: discord.Interaction,
+    nom: str, description: str, base: int, pieces: int, bonus: int,
+    stat: app_commands.Choice[str],
+    effet_type: app_commands.Choice[str] = None, effet_val: int = 1,
+    effet_type2: app_commands.Choice[str] = None, effet_val2: int = 1,
+    zone: bool = False, cooldown_tours: int = 0,
     cible_fiche: str = None, type_sort: app_commands.Choice[str] = None
 ):
     if not is_gm(interaction.user.id): return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
@@ -7044,41 +7059,45 @@ async def gm_freestyle(
     # Déterminer le type et le nom affiché
     is_bonus = type_sort and type_sort.value == "bonus"
     sort_type = "utilitaire" if is_bonus else "actif"
-    # Les sorts bonus doivent avoir "(Bonus)" dans le nom pour apparaître dans /action_bonus
     nom_final = nom if not is_bonus else (nom if "(Bonus)" in nom or "(BONUS)" in nom else f"{nom} (Bonus)")
 
     # 1. Générer une ID unique
     unique_id = f"free_{int(time.time())}"
     stat_code = stat.value if stat else "aucune"
 
-    # 2. Construction du JSON des effets (automatique)
+    # 2. Construction du JSON des effets
     data_effets = {}
+    status_dict = {}
     if effet_type:
+        status_dict[effet_type.value] = effet_val
+    if effet_type2 and (not effet_type or effet_type2.value != effet_type.value):
+        status_dict[effet_type2.value] = effet_val2
+    if status_dict:
         seuil_moyen = max(1, pieces // 2)
         data_effets["seuil"] = seuil_moyen
-        data_effets["status"] = {effet_type.value: effet_val}
+        data_effets["status"] = status_dict
     if zone:
         data_effets["aoe"] = True
-        
+
     json_str = json.dumps(data_effets)
 
     # 3. Sauvegarde dans le Grimoire global
     conn = get_db_connection()
     conn.execute('''
-        INSERT INTO config_sorts 
+        INSERT INTO config_sorts
         (ref, nom, classes, pallier, cout_achat, base, coins, bonus, stat_type, cout, cout_type, cooldown, desc, type, cat, data_json)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
-        unique_id, nom_final, '["monstre"]', 1, 0, 
+        unique_id, nom_final, '["monstre"]', 1, 0,
         base, pieces, bonus, stat_code, 0, "mana",
         cooldown_tours,
         description, sort_type, "monstre", json_str
     ))
     conn.commit()
     conn.close()
-    
+
     reload_data()
-    
+
     # 4. Ajout à la fiche cible
     p_cible = parse_cible_arg(cible_fiche) if cible_fiche else Personnage.charger(interaction.user.id)
     if p_cible:
@@ -7092,10 +7111,11 @@ async def gm_freestyle(
     else:
         embed = discord.Embed(title="⚡ Compétence Créée & Équipée !", color=0xE67E22)
         embed.description = f"**{p_cible.nom}** a appris l'attaque **{nom_final}**.\n*Elle est désormais dans l'autocomplétion de `/clash` et `/attaque`.*"
-    
+
     details = f"🎲 **Formule :** Base {base} + ({pieces}x{bonus}) + {stat.name}\n"
-    if effet_type: 
-        details += f"✨ **Effet :** {effet_type.name} ({effet_val})\n"
+    if status_dict:
+        effets_txt = " + ".join(f"{v}t de {k}" for k, v in status_dict.items())
+        details += f"✨ **Effets :** {effets_txt}\n"
     if zone:
         details += "💥 **Zone :** Touche plusieurs cibles\n"
     if cooldown_tours > 0:
@@ -7103,7 +7123,7 @@ async def gm_freestyle(
     details += f"📋 **Type :** {'⚡ Bonus (action_bonus)' if is_bonus else '⚔️ Actif (attaque/clash)'}"
     embed.add_field(name="Paramètres", value=details, inline=False)
     embed.add_field(name="Narration", value=f"*{description}*", inline=False)
-    
+
     await interaction.response.send_message(embed=embed)
 
 
@@ -7285,20 +7305,21 @@ async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choic
 
 @bot.tree.command(name="gm_creer_sort", description="(GM) Créer sort/passif (Options spécifiques Prêtre incluses)")
 @app_commands.describe(
-    ref="Code unique (ex: soin_majeur)", 
-    nom="Nom affiché", 
+    ref="Code unique (ex: soin_majeur)",
+    nom="Nom affiché",
     classe="Classe principale",
     type_sort="Type de capacité",
-    pallier="Niveau (1, 2...)",
     description="Description",
-    # Optionnels
-    cout="Coût (Mana pour Mage / Tension pour Guerrier / Ferveur pour Prêtre)",
-    versets="(Prêtre) Nombre de versets requis/consommés",
-    specialisation="Sous-classe (si nécessaire)",
-    base="Dégâts/Soin de base", 
-    coins="Nb pièces", 
-    bonus="Bonus par pièce", 
-    stat="Statistique utilisée (mettre 'aucune' pour passif/utilitaire)"
+    pallier="Niveau (1-5, laisser vide = personnalisé)",
+    cout="Coût (Mana / Tension / Ferveur selon la classe)",
+    versets="(Prêtre) Versets requis",
+    specialisation="Sous-classe (si visibilité = Spécialisation)",
+    base="Dégâts/Soin de base",
+    coins="Nb pièces",
+    bonus="Bonus par pièce",
+    stat="Statistique utilisée",
+    effets_cible="Effets sur la CIBLE : format 'effet:duree effet2:duree2' (ex: poison:2 stun:1)",
+    effets_soi="Effets sur SOI-MÊME : format 'effet:duree' (ex: dmg_boost:3 hate:1)"
 )
 @app_commands.autocomplete(classe=classe_autocomplete, stat=stat_autocomplete, specialisation=spe_autocomplete)
 @app_commands.choices(visibilite=[
@@ -7320,7 +7341,6 @@ async def gm_creer_sort(
     nom: str,
     classe: str,
     description: str,
-    # Arguments Optionnels
     pallier: int = 0,
     cout: int = 0,
     versets: int = 0,
@@ -7329,7 +7349,9 @@ async def gm_creer_sort(
     base: int = 0,
     coins: int = 0,
     bonus: int = 0,
-    stat: str = None
+    stat: str = None,
+    effets_cible: str = None,
+    effets_soi: str = None
 ):
     # Sécurité GM
     if not is_gm(interaction.user.id):
@@ -7346,33 +7368,51 @@ async def gm_creer_sort(
         classes_list = [specialisation.lower()]
     else: classes_list = [classe.lower()]
 
-    # 2. Gestion Prêtre & Coûts
+    # 2. Gestion Coûts
     cout_type = "mana"
     classe_lower = classe.lower()
-    if "guerrier" in classe_lower:
-        cout_type = "tension"
-    elif "pretre" in classe_lower:
-        cout_type = "ferveur"
+    if "guerrier" in classe_lower: cout_type = "tension"
+    elif "pretre" in classe_lower: cout_type = "ferveur"
 
     # 3. Stat utilisée
     if type_sort.value == "passif":
         base = 0; coins = 0; bonus = 0; stat_db = "aucune"
     else:
         stat_db = stat if stat else "aucune"
-        if not stat or stat == "aucune":
-            pass  # Utilitaire/bonus sans stat : autorisé
 
-    # 4. Sauvegarde
+    # 4. Effets : parser "poison:2 stun:1" → {"poison": 2, "stun": 1}
+    def parse_effets(raw: str) -> dict:
+        result = {}
+        if not raw: return result
+        for token in raw.strip().split():
+            if ':' in token:
+                parts = token.split(':', 1)
+                try: result[parts[0].lower()] = int(parts[1])
+                except ValueError: pass
+            else:
+                result[token.lower()] = 1  # durée par défaut = 1
+        return result
+
+    status_cible = parse_effets(effets_cible)
+    status_soi   = parse_effets(effets_soi)
+
+    # 5. Construire data_json
+    data = {}
+    if status_cible: data["status"] = status_cible
+    if status_soi:   data["self_status"] = status_soi
+    data_json_str = json.dumps(data) if data else "{}"
+
+    # 6. Sauvegarde
     conn = get_db_connection()
     try:
         conn.execute('''
             INSERT OR REPLACE INTO config_sorts
-            (ref, nom, classes, pallier, cout_achat, base, coins, bonus, stat_type, cout, cout_type, versets, cooldown, desc, type, cat)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (ref, nom, classes, pallier, cout_achat, base, coins, bonus, stat_type, cout, cout_type, versets, cooldown, desc, type, cat, data_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             ref.lower(), nom, json.dumps(classes_list), pallier, 1,
             base, coins, bonus, stat_db, cout, cout_type, versets, cooldown, description,
-            type_sort.value, cat
+            type_sort.value, cat, data_json_str
         ))
         conn.commit()
         reload_data()
@@ -7385,6 +7425,10 @@ async def gm_creer_sort(
         embed.add_field(name="Coût", value=cout_txt, inline=True)
         pallier_txt = f"P{pallier}" if pallier > 0 else "Personnalisé"
         embed.description = f"**{classe}** — {pallier_txt}\n{description}"
+        if status_cible:
+            embed.add_field(name="Effets sur cible", value=" / ".join(f"{e} ({d} tour{'s' if d>1 else ''})" for e,d in status_cible.items()), inline=False)
+        if status_soi:
+            embed.add_field(name="Effets sur soi", value=" / ".join(f"{e} ({d} tour{'s' if d>1 else ''})" for e,d in status_soi.items()), inline=False)
 
         await interaction.response.send_message(embed=embed)
 
