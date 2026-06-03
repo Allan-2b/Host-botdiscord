@@ -1619,8 +1619,8 @@ async def classe_autocomplete(interaction: discord.Interaction, current: str):
     return [app_commands.Choice(name=c, value=c) for c in classes_base if current.lower() in c.lower()]
 
 async def stat_autocomplete(interaction: discord.Interaction, current: str):
-    stats = {"phy": "Physique", "esp": "Esprit", "agi": "Agilité", "foi": "Foi", "int_stat": "Intelligence", "sag": "Sagesse", "const": "Constitution"}
-    return [app_commands.Choice(name=nom, value=code) for code, nom in stats.items() if current.lower() in nom.lower()]
+    stats = {"aucune": "Aucune", "phy": "Physique", "esp": "Esprit", "agi": "Agilité", "foi": "Foi", "int_stat": "Intelligence", "sag": "Sagesse", "const": "Constitution"}
+    return [app_commands.Choice(name=nom, value=code) for code, nom in stats.items() if current.lower() in nom.lower() or current == ""]
 
 async def tour_noms_autocomplete(interaction: discord.Interaction, current: str):
     """Autocomplete pour /tour : liste tous les personnages de tous les joueurs en session.
@@ -5832,7 +5832,7 @@ async def repos(interaction: discord.Interaction):
     p: Personnage = Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("Pas de fiche.", ephemeral=True)
     
-    p.recalculer_derives()  # Recalcule versets_max, mana_max, pv_max avant de les utiliser
+    # On ne recalcule PAS recalculer_derives() ici pour préserver les stats forcées via /gm_set_stat
     p.pv_actuel = p.pv_max
     
     if p.mode_entrainement:
@@ -7298,97 +7298,96 @@ async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choic
     base="Dégâts/Soin de base", 
     coins="Nb pièces", 
     bonus="Bonus par pièce", 
-    stat="Statistique utilisée"
+    stat="Statistique utilisée (mettre 'aucune' pour passif/utilitaire)"
 )
 @app_commands.autocomplete(classe=classe_autocomplete, stat=stat_autocomplete, specialisation=spe_autocomplete)
 @app_commands.choices(visibilite=[
     app_commands.Choice(name="Tronc Commun", value="tronc"),
     app_commands.Choice(name="Spécialisation", value="spe"),
-    app_commands.Choice(name="Monstre", value="monstre")
+    app_commands.Choice(name="Monstre", value="monstre"),
+    app_commands.Choice(name="Personnalisé (don direct)", value="custom")
 ], type_sort=[
     app_commands.Choice(name="⚔️ Attaque / Actif", value="actif"),
     app_commands.Choice(name="🛡️ Passif", value="passif"),
-    app_commands.Choice(name="💚 Soin", value="soin")
+    app_commands.Choice(name="💚 Soin", value="soin"),
+    app_commands.Choice(name="🎁 Utilitaire", value="utilitaire")
 ])
 async def gm_creer_sort(
-    interaction: discord.Interaction, 
+    interaction: discord.Interaction,
     visibilite: app_commands.Choice[str],
     type_sort: app_commands.Choice[str],
-    ref: str, 
-    nom: str, 
-    classe: str, 
-    pallier: int, 
+    ref: str,
+    nom: str,
+    classe: str,
     description: str,
     # Arguments Optionnels
+    pallier: int = 0,
     cout: int = 0,
-    versets: int = 0, # <--- NOUVEAU CHAMP
+    versets: int = 0,
     cooldown: int = 0,
     specialisation: str = None,
-    base: int = 0, 
-    coins: int = 0, 
-    bonus: int = 0, 
+    base: int = 0,
+    coins: int = 0,
+    bonus: int = 0,
     stat: str = None
 ):
     # Sécurité GM
-    if not is_gm(interaction.user.id): 
+    if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
     cat = visibilite.value
     classes_list = []
-    
+
     # 1. Gestion Classes
     if cat == "monstre": classes_list = ["monstre"]
+    elif cat == "custom": classes_list = ["custom"]
     elif cat == "spe":
         if not specialisation: return await interaction.response.send_message("❌ Spécialisation requise.", ephemeral=True)
         classes_list = [specialisation.lower()]
     else: classes_list = [classe.lower()]
 
     # 2. Gestion Prêtre & Coûts
-    cout_type = "mana" # Défaut
+    cout_type = "mana"
     classe_lower = classe.lower()
-
-    if "guerrier" in classe_lower: 
+    if "guerrier" in classe_lower:
         cout_type = "tension"
-    elif "pretre" in classe_lower: 
-        cout_type = "ferveur" 
-        # Si c'est un prêtre, 'cout' devient automatiquement de la Ferveur.
-    
-    # Si c'est un passif, on nettoie les stats de combat
-    stat_db = stat if stat else "phy"
+    elif "pretre" in classe_lower:
+        cout_type = "ferveur"
+
+    # 3. Stat utilisée
     if type_sort.value == "passif":
         base = 0; coins = 0; bonus = 0; stat_db = "aucune"
-        # On garde cout et versets car certains passifs puissants pourraient avoir un pré-requis
     else:
-        if not stat: return await interaction.response.send_message("❌ Précisez la statistique pour un Actif/Soin.", ephemeral=True)
+        stat_db = stat if stat else "aucune"
+        if not stat or stat == "aucune":
+            pass  # Utilitaire/bonus sans stat : autorisé
 
-    # 3. Sauvegarde
+    # 4. Sauvegarde
     conn = get_db_connection()
     try:
-        # Notez l'ajout de la colonne 'versets' dans la requête
         conn.execute('''
-            INSERT OR REPLACE INTO config_sorts 
+            INSERT OR REPLACE INTO config_sorts
             (ref, nom, classes, pallier, cout_achat, base, coins, bonus, stat_type, cout, cout_type, versets, cooldown, desc, type, cat)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            ref.lower(), nom, json.dumps(classes_list), pallier, 1, 
-            base, coins, bonus, stat_db, cout, cout_type, versets, cooldown, description, 
+            ref.lower(), nom, json.dumps(classes_list), pallier, 1,
+            base, coins, bonus, stat_db, cout, cout_type, versets, cooldown, description,
             type_sort.value, cat
         ))
         conn.commit()
         reload_data()
-        
-        # Confirmation visuelle
+
         embed = discord.Embed(title="✅ Compétence Enregistrée", color=0x2ecc71)
         embed.add_field(name="Nom", value=f"{nom} ({type_sort.name})", inline=True)
-        
-        cout_txt = f"{cout} {cout_type.capitalize()}"
+        cout_txt = f"{cout} {cout_type.capitalize()}" if cout > 0 else "Gratuit"
         if versets > 0: cout_txt += f" + {versets} Versets"
         if cooldown > 0: cout_txt += f" + {cooldown} tours de recharge"
-        embed.add_field(name="Coût / Requis", value=cout_txt, inline=True)
-        embed.description = f"**{classe}** (P{pallier})\n{description}"
-            
+        embed.add_field(name="Coût", value=cout_txt, inline=True)
+        pallier_txt = f"P{pallier}" if pallier > 0 else "Personnalisé"
+        embed.description = f"**{classe}** — {pallier_txt}\n{description}"
+
         await interaction.response.send_message(embed=embed)
-        
+
     except Exception as e:
         await interaction.response.send_message(f"❌ Erreur SQL : {e}", ephemeral=True)
     finally:
