@@ -5355,6 +5355,10 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
         ancienne_valeur = p.pv_max
     else:
         setattr(p, code_stat, valeur)
+        # Mettre aussi à jour la valeur de base mémorisée pour éviter le stacking items
+        base_key = f"_base_{code_stat}"
+        if hasattr(p, base_key):
+            setattr(p, base_key, valeur)
 
     # Si on modifie les PV Max, on ne touche pas aux PV actuels (sauf si actuels > max)
     if p.pv_actuel > p.pv_max:
