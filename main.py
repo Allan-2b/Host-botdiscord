@@ -240,6 +240,10 @@ def init_db():
     except sqlite3.OperationalError: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN badges TEXT DEFAULT '[]'")
     except sqlite3.OperationalError: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN gm_mana_max_bonus INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN gm_pv_max_bonus INTEGER DEFAULT 0")
+    except: pass
 
     conn.commit()
     conn.close()
@@ -1113,6 +1117,8 @@ class Personnage:
         self.bonus_pieces_item = 0
         self.mana_max_bonus_item = 0
         self.pv_max_bonus_item = 0
+        self.gm_mana_max_bonus = 0
+        self.gm_pv_max_bonus = 0
         self.posture_active = 0
         self.designation_target_id = 0
         self.designation_stacks = 0
@@ -1168,6 +1174,9 @@ class Personnage:
             self.pv_max += 4
         if "passif_lotus_discipline" in self.competences:
             self.pv_max += 5
+        # Bonus GM persistants (non effacés par les items ni le repos)
+        self.pv_max += getattr(self, "gm_pv_max_bonus", 0)
+        self.mana_max += getattr(self, "gm_mana_max_bonus", 0)
 
     def get_bonus_niveau(self):
         return self.niveau // 5
@@ -1193,9 +1202,10 @@ class Personnage:
              passe_active, parade_absorb, last_action_type, fureur_tribale_used,
              concentre, serment_actif, serment_bonus, posture_active,
              designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges, mana_bonus_racial,
-             bonus_base_item, bonus_pieces_item, mana_max_bonus_item, pv_max_bonus_item)
+             bonus_base_item, bonus_pieces_item, mana_max_bonus_item, pv_max_bonus_item,
+             gm_mana_max_bonus, gm_pv_max_bonus)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
               self.tension, self.ferveur, self.versets, 
@@ -1212,7 +1222,8 @@ class Personnage:
               self.designation_target_id, self.designation_stacks, self.sentence_target_id, json.dumps(self.sentence_targets), self.passe_count,
               json.dumps(self.badges), getattr(self, 'mana_bonus_racial', 0),
               getattr(self, 'bonus_base_item', 0), getattr(self, 'bonus_pieces_item', 0),
-              getattr(self, 'mana_max_bonus_item', 0), getattr(self, 'pv_max_bonus_item', 0)))
+              getattr(self, 'mana_max_bonus_item', 0), getattr(self, 'pv_max_bonus_item', 0),
+              getattr(self, 'gm_mana_max_bonus', 0), getattr(self, 'gm_pv_max_bonus', 0)))
         
         # Ne mettre à jour la session que si ce personnage est déjà le personnage actif
         # Évite d'écraser la session du MJ quand il sauvegarde un PNJ/monstre en combat
@@ -1272,6 +1283,8 @@ class Personnage:
         p.bonus_pieces_item = row['bonus_pieces_item'] if 'bonus_pieces_item' in row.keys() else 0
         p.mana_max_bonus_item = row['mana_max_bonus_item'] if 'mana_max_bonus_item' in row.keys() else 0
         p.pv_max_bonus_item = row['pv_max_bonus_item'] if 'pv_max_bonus_item' in row.keys() else 0
+        p.gm_mana_max_bonus = row['gm_mana_max_bonus'] if 'gm_mana_max_bonus' in row.keys() else 0
+        p.gm_pv_max_bonus = row['gm_pv_max_bonus'] if 'gm_pv_max_bonus' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
         p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
@@ -7288,13 +7301,29 @@ async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choic
         if not p: return await interaction.response.send_message("❌ Incarnez un personnage ou précisez une cible_fiche.", ephemeral=True)
 
     code_stat = stat.value
-    
-    # Modification directe
-    setattr(p, code_stat, valeur)
-    
-    # Si on change les PV Max, on remet les PV actuels au max aussi pour être sympa
-    if code_stat == "pv_max":
+
+    # Pour mana_max et pv_max : on passe par gm_bonus pour ne pas être écrasé par recalculer_derives
+    if code_stat == "mana_max":
+        # Calcule le mana_max de base (sans gm_bonus) pour savoir le delta
+        base_mana = (p.int_stat * 8) + 10 + getattr(p, "mana_bonus_racial", 0) + getattr(p, "mana_max_bonus_item", 0)
+        p.gm_mana_max_bonus = valeur - base_mana
+        p.mana_max = valeur
+    elif code_stat == "pv_max":
+        if p.classe == "guerrier":
+            bonus_humain = (p.niveau // 3) * 2 if p.race == "Humain" else 0
+            base_pv = 55 + ((p.niveau - 1) * 8) + getattr(p, "pv_max_bonus_item", 0) + bonus_humain
+        elif p.classe == "mage":
+            base_pv = 35 + ((p.niveau - 1) * 4) + getattr(p, "pv_max_bonus_item", 0)
+        else:
+            base_pv = 45 + ((p.niveau - 1) * 6) + getattr(p, "pv_max_bonus_item", 0)
+        if "passif_legion_rempart" in p.competences: base_pv += 4
+        if "passif_lotus_discipline" in p.competences: base_pv += 5
+        p.gm_pv_max_bonus = valeur - base_pv
+        p.pv_max = valeur
         p.pv_actuel = valeur
+    else:
+        # Modification directe pour les autres stats (phy, esp, etc.)
+        setattr(p, code_stat, valeur)
 
     p.sauvegarder()
 
