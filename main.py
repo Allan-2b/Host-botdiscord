@@ -1209,8 +1209,8 @@ class Personnage:
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
               self.tension, self.ferveur, self.versets, 
-              self.phy, self.const, self.agi,
-              self.esp, self.int_stat, self.foi, self.sag,
+              getattr(self, "_base_phy", self.phy), getattr(self, "_base_const", self.const), getattr(self, "_base_agi", self.agi),
+              getattr(self, "_base_esp", self.esp), getattr(self, "_base_int_stat", self.int_stat), getattr(self, "_base_foi", self.foi), getattr(self, "_base_sag", self.sag),
               self.points_stat, self.points_comp, self.points_attribut, skills_json,
               self.oral, self.force_rp, self.survie, self.histoire, 
               self.sciences, self.medecine, self.religion, self.discretion, self.acrobatie,
@@ -1389,7 +1389,19 @@ class Personnage:
         ''', (self.user_id,)).fetchall()
         self.equipement = [dict(row) for row in rows]
 
-        # Reset bonuses items
+        # Stats qui peuvent venir d'items et qui doivent être remises à leur valeur de base
+        # avant chaque recalcul pour éviter le stacking à l'infini
+        STATS_DIRECTES = ["esp", "phy", "agi", "const", "foi", "sag", "int_stat", "rob", "robustesse"]
+        for s in STATS_DIRECTES:
+            base_key = f"_base_{s}"
+            if not hasattr(self, base_key):
+                # Première fois : on mémorise la valeur de base (sans items)
+                setattr(self, base_key, getattr(self, s, 0))
+            else:
+                # Les fois suivantes : on repart de la base mémorisée
+                setattr(self, s, getattr(self, base_key))
+
+        # Reset bonuses items (accumulateurs propres)
         self.bonus_base_item = 0
         self.bonus_pieces_item = 0
         self.mana_max_bonus_item = 0
