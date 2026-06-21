@@ -1074,6 +1074,9 @@ class Skill:
         total = self.base + (self.bonus * heads) + self.stat_bonus + bonus_niveau
         return total, details, heads
 
+# Coefficient de rééquilibrage des soins (-30% pour raccourcir les combats)
+COEFF_HEAL = 0.7
+
 class Personnage:
     def __init__(self, user_id, nom, classe_nom, race="Humain", charger_db=False):
         self.user_id = user_id
@@ -1158,14 +1161,16 @@ class Personnage:
     def recalculer_derives(self):
         self.mana_max = 0
         self.versets_max = 0
+        # ── Rééquilibrage combat (-30% PV pour raccourcir les combats) ──
+        # Anciennes formules : guerrier 55+(niv-1)*8 / mage 35+(niv-1)*4 / pretre 45+(niv-1)*6
         if self.classe == "guerrier":
             bonus_humain = (self.niveau // 3) * 2 if self.race == "Humain" else 0
-            self.pv_max = 55 + ((self.niveau - 1) * 8) + getattr(self, 'pv_max_bonus_item', 0) + bonus_humain
+            self.pv_max = 38 + ((self.niveau - 1) * 6) + getattr(self, 'pv_max_bonus_item', 0) + bonus_humain
         elif self.classe == "mage":
-            self.pv_max = 35 + ((self.niveau - 1) * 4) + getattr(self, 'pv_max_bonus_item', 0)
+            self.pv_max = 25 + ((self.niveau - 1) * 3) + getattr(self, 'pv_max_bonus_item', 0)
             self.mana_max = (self.int_stat * 8) + 10 + getattr(self, 'mana_bonus_racial', 0) + getattr(self, 'mana_max_bonus_item', 0) 
         elif self.classe == "pretre":
-            self.pv_max = 45 + ((self.niveau - 1) * 6) + getattr(self, 'pv_max_bonus_item', 0)
+            self.pv_max = 32 + ((self.niveau - 1) * 4) + getattr(self, 'pv_max_bonus_item', 0)
             self.versets_max = self.sag 
         if self.race == "Féral":
             self.pv_max -= 5
@@ -1356,6 +1361,11 @@ class Personnage:
 
     def ajouter_effet(self, code, duree, puissance=None):
         if self.race == "Drakéide" and code in ["brulure", "gel"]:
+            return
+
+        # Anti-stunlock : on ne peut pas être étourdi si on est déjà étourdi
+        # ou si on vient de subir un stun le tour précédent (immunité 1 tour)
+        if code == "stun" and ("stun" in self.effets or "stun_immune" in self.effets):
             return
 
         effets_cumulables = ["hemorragie", "brulure"]
@@ -2050,7 +2060,7 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
     # Soin basé sur le Festin (Millésime Écarlate)
     if data.get("festin_heal") and attaquant.classe == "mage":
         stade = get_festin_stade(attaquant)
-        soin_festin = stade * 6  # 0/6/12/18/24 selon stade
+        soin_festin = max(1, int(stade * 6 * COEFF_HEAL)) if stade > 0 else 0  # 0/6/12/18/24 -> -30%
         if soin_festin > 0:
             attaquant.pv_actuel = min(attaquant.pv_max, attaquant.pv_actuel + soin_festin)
             msg.append(f"🩸 **Millésime Écarlate** : +{soin_festin} PV (Stade {stade}).")
@@ -2544,7 +2554,7 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
     # -- ORDRE HOSPITALIER : soin_cible (Imposition des Mains) --
     # Soin fixe supplémentaire sur la cible, en plus du jet normal.
     if "soin_cible" in data and defenseur:
-        soin_bonus = data["soin_cible"]
+        soin_bonus = max(1, int(data["soin_cible"] * COEFF_HEAL))
         defenseur.pv_actuel = min(defenseur.pv_max, defenseur.pv_actuel + soin_bonus)
         msg.append(f"💚 **Imposition des Mains** : +{soin_bonus} PV sur {getattr(defenseur, 'nom', 'cible')} !")
 
@@ -2573,8 +2583,8 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
     # -- ORDRE HOSPITALIER : sacrifice_absolu (Sacrifice Absolu P5) --
     if data.get("sacrifice_absolu") and attaquant:
         attaquant.pv_actuel = 1
-        # Soin de 40% des PV max sur tous les alliés (MJ notifié — le bot ne peut pas cibler toute l'équipe auto)
-        msg.append(f"✨ **SACRIFICE ABSOLU** : {attaquant.nom} tombe à 1 PV ! Tous les alliés régénèrent **40% de leurs PV max** (annoncez le soin — chaque allié utilise /defense ou /gm_effet).")
+        pct_sacrifice = int(40 * COEFF_HEAL)  # 40% -> 28%
+        msg.append(f"✨ **SACRIFICE ABSOLU** : {attaquant.nom} tombe à 1 PV ! Tous les alliés régénèrent **{pct_sacrifice}% de leurs PV max** (annoncez le soin — chaque allié utilise /defense ou /gm_effet).")
 
     # -- INQUISITEUR : cleanse_furtif (Contre-Espionnage Novice P3 / Total P5) --
     # Révèle les personnes invisibles/déguisées. Retire les effets de furtivité sur la cible.
@@ -2808,6 +2818,7 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
 
     msg_effet = ""
     if skill_data.get('type') == 'soin':
+        total = max(1, int(total * COEFF_HEAL))
         if p.race == "Céleste": total += 3
         p.pv_actuel = min(p.pv_max, p.pv_actuel + total)
         msg_effet = f"\n💚 **Soin :** +{total} PV"
@@ -3053,6 +3064,9 @@ async def tour(interaction: discord.Interaction,
                         detail = "(Défense possible)" if code == "gel" else "(Aucune défense)"
                         rapport_effets.append(f"{ico} **{nom_etat}** : Tour passé {detail} !")
                 
+                elif code == "stun_immune":
+                    pass  # Tag interne silencieux, juste décrémenté plus bas
+
                 elif code == "hate":
                     rapport_effets.append(f"{ico} **Hâte** : +2 Pièces.")
 
@@ -3084,6 +3098,9 @@ async def tour(interaction: discord.Interaction,
                 if code in p.effets:
                     del p.effets[code]
                     rapport_effets.append(f"✨ L'effet **{code.capitalize()}** s'est dissipé.")
+                    # Anti-stunlock : 1 tour d'immunité au stun après qu'il se soit dissipé
+                    if code == "stun":
+                        p.effets["stun_immune"] = {"duree": 1, "valeur": 1}
 
             # Application des dégâts totaux du tour
             if pv_perdus_total > 0:
@@ -3324,12 +3341,12 @@ async def soigner(interaction: discord.Interaction, sort: str, cible: str, perso
     data_j = json.loads(skill_data.get("data_json", "{}"))
     msg_lotus_soin = ""
     if "moine_lotus" in p.sous_classes_unlocked and "soin_base" in data_j:
-        soin_fixe = data_j["soin_base"]
+        soin_fixe = max(1, int(data_j["soin_base"] * COEFF_HEAL))
         total_soin = soin_fixe  # Override : soin fixe, pas dé
         visuel_base = [f"💚{soin_fixe}(fixe)"]
         # Bonus Concentré
         if p.concentre and "concentre_bonus" in data_j:
-            bonus_c = data_j["concentre_bonus"]
+            bonus_c = max(1, int(data_j["concentre_bonus"] * COEFF_HEAL))
             total_soin += bonus_c
             visuel_base.append(f"🌸+{bonus_c}(Concentré)")
         # Malus Perturbé : moitié (si pas Concentré)
@@ -6932,7 +6949,7 @@ async def gm_spawn(interaction: discord.Interaction, nom: str, niveau: int, clas
     # --- 5. FINALISATION ---
     p.recalculer_derives()
     if race_defaut == "Monstre":
-        p.pv_max += (niveau * 5)
+        p.pv_max += (niveau * 4)  # Anciennement niveau*5, réduit ~30% pour raccourcir les combats
         p.mana_max += (niveau * 2)
 
     p.pv_actuel = p.pv_max
