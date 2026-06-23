@@ -1164,8 +1164,8 @@ class Personnage:
         # ── Rééquilibrage combat (-30% PV pour raccourcir les combats) ──
         # Anciennes formules : guerrier 55+(niv-1)*8 / mage 35+(niv-1)*4 / pretre 45+(niv-1)*6
         if self.classe == "guerrier":
-            bonus_humain = (self.niveau // 3) * 2 if self.race == "Humain" else 0
-            self.pv_max = 38 + ((self.niveau - 1) * 6) + getattr(self, 'pv_max_bonus_item', 0) + bonus_humain
+            # bonus_humain est géré cumulativement via gm_pv_max_bonus dans appliquer_pallier_race
+            self.pv_max = 38 + ((self.niveau - 1) * 6) + getattr(self, 'pv_max_bonus_item', 0)
         elif self.classe == "mage":
             self.pv_max = 25 + ((self.niveau - 1) * 3) + getattr(self, 'pv_max_bonus_item', 0)
             self.mana_max = (self.int_stat * 8) + 10 + getattr(self, 'mana_bonus_racial', 0) + getattr(self, 'mana_max_bonus_item', 0) 
@@ -1461,8 +1461,10 @@ class Personnage:
             elif self.classe == "pretre": self.medecine += 1; self.religion += 1
 
         elif self.race == "Humain":
-            if self.classe == "mage": pass 
-            elif self.classe == "guerrier": self.pv_max += 2; self.pv_actuel += 2
+            if self.classe == "mage": pass
+            elif self.classe == "guerrier":
+                # Stocké dans gm_pv_max_bonus pour survivre à recalculer_derives()
+                self.gm_pv_max_bonus = getattr(self, "gm_pv_max_bonus", 0) + 2
             elif self.classe == "pretre": self.points_comp += 1
 
         elif self.race == "Nain":
@@ -7343,8 +7345,9 @@ async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choic
         p.mana_max = valeur
     elif code_stat == "pv_max":
         if p.classe == "guerrier":
-            bonus_humain = (p.niveau // 3) * 2 if p.race == "Humain" else 0
-            base_pv = 55 + ((p.niveau - 1) * 8) + getattr(p, "pv_max_bonus_item", 0) + bonus_humain
+            base_pv = 38 + ((p.niveau - 1) * 6) + getattr(p, "pv_max_bonus_item", 0)
+            if "passif_legion_rempart" in p.competences: base_pv += 4
+            if "passif_lotus_discipline" in p.competences: base_pv += 5
         elif p.classe == "mage":
             base_pv = 35 + ((p.niveau - 1) * 4) + getattr(p, "pv_max_bonus_item", 0)
         else:
