@@ -1422,6 +1422,16 @@ class Personnage:
             "mana_max": "mana_max_bonus_item",
             "bonus_base_item": "bonus_base_item",
             "bonus_pieces_item": "bonus_pieces_item",
+            # Stats directes — appliquées directement sur l'attribut
+            "phy": "phy", "esp": "esp", "agi": "agi", "const": "const",
+            "foi": "foi", "sag": "sag", "int_stat": "int_stat",
+            "rob": "rob", "robustesse": "robustesse",
+            "versets_max": "versets_max",
+            # Compétences RP
+            "discretion": "discretion", "histoire": "histoire",
+            "medecine": "medecine", "sciences": "sciences",
+            "religion": "religion", "acrobatie": "acrobatie",
+            "oral": "oral", "force_rp": "force_rp", "survie": "survie",
         }
 
         # Appliquer bonus_json des items identifiés
@@ -7741,32 +7751,88 @@ async def set_autocomplete(interaction: discord.Interaction, current: str):
 @bot.tree.command(name="gm_creer_item", description="(GM) Créer un objet")
 @app_commands.describe(
     ref="Code unique (ex: epee_fer)", nom="Nom affiché",
-    description="Description des effets",
+    description="Description RP de l'objet",
     rarete="Rareté de l'objet",
-    bonus_json='Bonus JSON (ex: {"pv_max":5,"mana_max":10,"phy":1})',
+    bonus_type="Bonus principal (stat ou ressource)",
+    bonus_valeur="Valeur du bonus principal (ex: 2 pour +2)",
+    bonus_type2="Bonus secondaire (optionnel)",
+    bonus_valeur2="Valeur du bonus secondaire",
     necessite_etude="L'objet doit-il être étudié avant de fonctionner ?",
     set_ref="(Optionnel) Associer directement à un set existant"
 )
-@app_commands.choices(slot=[
-    app_commands.Choice(name="⚔️ Arme",             value="arme"),
-    app_commands.Choice(name="📿 Collier/Amulette",  value="collier"),
-    app_commands.Choice(name="💍 Bague/Anneau",      value="anneau"),
-    app_commands.Choice(name="🛡️ Armure",            value="armure"),
-    app_commands.Choice(name="🧥 Cape",              value="cape"),
-    app_commands.Choice(name="🧵 Ceinture",          value="ceinture"),
-    app_commands.Choice(name="🎩 Chapeau",           value="chapeau"),
-    app_commands.Choice(name="🧤 Gants",             value="gants"),
-    app_commands.Choice(name="👢 Bottes",            value="bottes"),
-], rarete=[
-    app_commands.Choice(name="⚪ Commun (5 pts)",       value="commun"),
-    app_commands.Choice(name="🟢 Peu commun (10 pts)",  value="peu_commun"),
-    app_commands.Choice(name="🔵 Rare (15 pts)",        value="rare"),
-    app_commands.Choice(name="🟣 Épique (25 pts)",      value="epique"),
-    app_commands.Choice(name="🟠 Légendaire (40 pts)",  value="legendaire"),
-])
+@app_commands.choices(
+    slot=[
+        app_commands.Choice(name="⚔️ Arme",             value="arme"),
+        app_commands.Choice(name="📿 Collier/Amulette",  value="collier"),
+        app_commands.Choice(name="💍 Bague/Anneau",      value="anneau"),
+        app_commands.Choice(name="🛡️ Armure",            value="armure"),
+        app_commands.Choice(name="🧥 Cape",              value="cape"),
+        app_commands.Choice(name="🧵 Ceinture",          value="ceinture"),
+        app_commands.Choice(name="🎩 Chapeau",           value="chapeau"),
+        app_commands.Choice(name="🧤 Gants",             value="gants"),
+        app_commands.Choice(name="👢 Bottes",            value="bottes"),
+    ],
+    rarete=[
+        app_commands.Choice(name="⚪ Commun (5 pts)",       value="commun"),
+        app_commands.Choice(name="🟢 Peu commun (10 pts)",  value="peu_commun"),
+        app_commands.Choice(name="🔵 Rare (15 pts)",        value="rare"),
+        app_commands.Choice(name="🟣 Épique (25 pts)",      value="epique"),
+        app_commands.Choice(name="🟠 Légendaire (40 pts)",  value="legendaire"),
+    ],
+    bonus_type=[
+        app_commands.Choice(name="⚔️ Physique (PHY)",     value="phy"),
+        app_commands.Choice(name="🔮 Esprit (ESP)",        value="esp"),
+        app_commands.Choice(name="💨 Agilité (AGI)",       value="agi"),
+        app_commands.Choice(name="🛡️ Constitution (CON)",  value="const"),
+        app_commands.Choice(name="✝️ Foi (FOI)",           value="foi"),
+        app_commands.Choice(name="📖 Sagesse (SAG)",       value="sag"),
+        app_commands.Choice(name="🧠 Intelligence (INT)",  value="int_stat"),
+        app_commands.Choice(name="🔴 PV Max",              value="pv_max"),
+        app_commands.Choice(name="🔵 Mana Max",            value="mana_max"),
+        app_commands.Choice(name="🪨 Robustesse (ROB)",    value="rob"),
+        app_commands.Choice(name="🎲 +Base (dégâts)",      value="bonus_base_item"),
+        app_commands.Choice(name="🎰 +Pièces (dés bonus)", value="bonus_pieces_item"),
+        app_commands.Choice(name="📜 Versets Max",         value="versets_max"),
+        app_commands.Choice(name="🗡️ Discrétion",          value="discretion"),
+        app_commands.Choice(name="📚 Histoire",             value="histoire"),
+        app_commands.Choice(name="🏥 Médecine",            value="medecine"),
+        app_commands.Choice(name="⚗️ Sciences",            value="sciences"),
+        app_commands.Choice(name="🙏 Religion",            value="religion"),
+        app_commands.Choice(name="🤸 Acrobatie",           value="acrobatie"),
+        app_commands.Choice(name="🗣️ Oral",                value="oral"),
+        app_commands.Choice(name="💪 Force RP",            value="force_rp"),
+        app_commands.Choice(name="🌿 Survie",              value="survie"),
+    ],
+    bonus_type2=[
+        app_commands.Choice(name="⚔️ Physique (PHY)",     value="phy"),
+        app_commands.Choice(name="🔮 Esprit (ESP)",        value="esp"),
+        app_commands.Choice(name="💨 Agilité (AGI)",       value="agi"),
+        app_commands.Choice(name="🛡️ Constitution (CON)",  value="const"),
+        app_commands.Choice(name="✝️ Foi (FOI)",           value="foi"),
+        app_commands.Choice(name="📖 Sagesse (SAG)",       value="sag"),
+        app_commands.Choice(name="🧠 Intelligence (INT)",  value="int_stat"),
+        app_commands.Choice(name="🔴 PV Max",              value="pv_max"),
+        app_commands.Choice(name="🔵 Mana Max",            value="mana_max"),
+        app_commands.Choice(name="🪨 Robustesse (ROB)",    value="rob"),
+        app_commands.Choice(name="🎲 +Base (dégâts)",      value="bonus_base_item"),
+        app_commands.Choice(name="🎰 +Pièces (dés bonus)", value="bonus_pieces_item"),
+        app_commands.Choice(name="📜 Versets Max",         value="versets_max"),
+        app_commands.Choice(name="🗡️ Discrétion",          value="discretion"),
+        app_commands.Choice(name="📚 Histoire",             value="histoire"),
+        app_commands.Choice(name="🏥 Médecine",            value="medecine"),
+        app_commands.Choice(name="⚗️ Sciences",            value="sciences"),
+        app_commands.Choice(name="🙏 Religion",            value="religion"),
+        app_commands.Choice(name="🤸 Acrobatie",           value="acrobatie"),
+        app_commands.Choice(name="🗣️ Oral",                value="oral"),
+        app_commands.Choice(name="💪 Force RP",            value="force_rp"),
+        app_commands.Choice(name="🌿 Survie",              value="survie"),
+    ]
+)
 @app_commands.autocomplete(set_ref=set_autocomplete)
 async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, slot: app_commands.Choice[str], description: str,
-                        rarete: app_commands.Choice[str] = None, bonus_json: str = '{}',
+                        rarete: app_commands.Choice[str] = None,
+                        bonus_type: app_commands.Choice[str] = None, bonus_valeur: int = 0,
+                        bonus_type2: app_commands.Choice[str] = None, bonus_valeur2: int = 0,
                         necessite_etude: bool = False, set_ref: str = None):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
@@ -7775,10 +7841,13 @@ async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, sl
     RARETE_POINTS = {"commun": 5, "peu_commun": 10, "rare": 15, "epique": 25, "legendaire": 40}
     pts = RARETE_POINTS.get(rarete_val, 5)
 
-    try:
-        json.loads(bonus_json)
-    except Exception:
-        return await interaction.response.send_message('❌ `bonus_json` invalide. Ex: `{"pv_max":5,"mana_max":10}`', ephemeral=True)
+    # Construire bonus_json depuis les menus déroulants
+    bonus_dict = {}
+    if bonus_type and bonus_valeur:
+        bonus_dict[bonus_type.value] = bonus_valeur
+    if bonus_type2 and bonus_valeur2:
+        bonus_dict[bonus_type2.value] = bonus_valeur2
+    bonus_json = json.dumps(bonus_dict)
 
     ref_clean = ref.lower()
     conn = get_db_connection()
