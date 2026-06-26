@@ -1401,7 +1401,11 @@ class Personnage:
 
         # Stats qui peuvent venir d'items et qui doivent être remises à leur valeur de base
         # avant chaque recalcul pour éviter le stacking à l'infini
-        STATS_DIRECTES = ["esp", "phy", "agi", "const", "foi", "sag", "int_stat", "rob", "robustesse"]
+        STATS_DIRECTES = [
+            "esp", "phy", "agi", "const", "foi", "sag", "int_stat", "rob", "robustesse",
+            "discretion", "histoire", "medecine", "sciences", "religion", "acrobatie",
+            "oral", "force_rp", "survie", "versets_max",
+        ]
         for s in STATS_DIRECTES:
             base_key = f"_base_{s}"
             if not hasattr(self, base_key):
@@ -1417,6 +1421,11 @@ class Personnage:
         self.mana_max_bonus_item = 0
         self.pv_max_bonus_item = 0
 
+        # Appliquer les offsets manuels définis via /set_stat (persistés)
+        for key in ("bonus_pieces_item", "bonus_base_item"):
+            manual = getattr(self, f"_manual_{key}", None)
+            if manual is not None:
+                setattr(self, key, manual)
         BONUS_MAP = {
             "pv_max": "pv_max_bonus_item",
             "mana_max": "mana_max_bonus_item",
@@ -5382,6 +5391,12 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
         p.recalculer_derives()
         code_stat = "pv_max_bonus_item"
         ancienne_valeur = p.pv_max
+    elif code_stat in ("bonus_pieces_item", "bonus_base_item"):
+        # Ces valeurs sont recalculées par charger_equipement à chaque fois
+        # → on les stocke comme offset manuel dans un champ dédié
+        offset_key = f"_manual_{code_stat}"
+        setattr(p, offset_key, valeur)
+        setattr(p, code_stat, valeur)
     else:
         setattr(p, code_stat, valeur)
         # Mettre aussi à jour la valeur de base mémorisée pour éviter le stacking items
