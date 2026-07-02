@@ -1381,8 +1381,8 @@ class Personnage:
                 self.effets[code]["valeur"] = max(self.effets[code]["valeur"], puissance)
         else:
             self.effets[code] = {"duree": duree, "valeur": puissance}
-            # Le stun ne prend effet qu'au tour SUIVANT celui où il est appliqué.
-            if code == "stun":
+            # Le stun et le gel ne prennent effet qu'au tour SUIVANT celui où ils sont appliqués.
+            if code in ("stun", "gel"):
                 self.effets[code]["nouveau"] = True
         
         if code == "brulure":
@@ -3074,10 +3074,13 @@ async def tour(interaction: discord.Interaction,
                      rapport_effets.append(f"{ico} **Enraciné** : Agilité réduite à 0.")
 
                 elif code in ["stun", "gel"]:
-                    if code == "stun" and data.get("nouveau"):
+                    if data.get("nouveau"):
                         # Premier tour : annonce seulement, NE PAS décrémenter
                         data.pop("nouveau")
-                        rapport_effets.append(f"{ico} **Étourdi** : Bloqué au **prochain tour** !")
+                        if code == "stun":
+                            rapport_effets.append(f"{ico} **Étourdi** : Bloqué au **prochain tour** !")
+                        else:
+                            rapport_effets.append(f"{ico} **Gelé** : Tour passé au prochain tour — prochaine attaque reçue **x1.5** !")
                         continue  # skip la décrémentation de ce tour
                     else:
                         skip_turn = True
@@ -3941,7 +3944,7 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
             damage_final = int(damage_final * 0.75)
             bonus_txt += " 🦴(-25% Mutilé)"
         
-        if "gel" in perdant.effets:
+        if "gel" in perdant.effets and not perdant.effets["gel"].get("nouveau"):
             damage_final = int(damage_final * 1.5)
             bonus_txt += " x1.5 (❄️ Brise-Glace)"
             del perdant.effets["gel"]
@@ -4285,7 +4288,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
             msg_singularite = f"\n{msg_sing_txt}"
 
     # --- Passifs & Mécaniques ---
-    if "gel" in p_cible.effets:
+    if "gel" in p_cible.effets and not p_cible.effets["gel"].get("nouveau"):
         total = int(total * 1.5)
         visuel.append("❄️(Brise-Glace x1.5)")
         del p_cible.effets["gel"]
