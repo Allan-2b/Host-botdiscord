@@ -1399,21 +1399,17 @@ class Personnage:
         ''', (self.user_id,)).fetchall()
         self.equipement = [dict(row) for row in rows]
 
-        # Stats qui peuvent venir d'items et qui doivent être remises à leur valeur de base
-        # avant chaque recalcul pour éviter le stacking à l'infini
+        # Stats qui peuvent venir d'items — on mémorise la valeur actuelle (depuis DB)
+        # comme base AVANT d'ajouter les bonus items. Cette valeur est rechargée
+        # à chaque appel depuis self (qui vient de la DB), donc toujours à jour.
         STATS_DIRECTES = [
             "esp", "phy", "agi", "const", "foi", "sag", "int_stat", "rob", "robustesse",
             "discretion", "histoire", "medecine", "sciences", "religion", "acrobatie",
             "oral", "force_rp", "survie", "versets_max",
         ]
         for s in STATS_DIRECTES:
-            base_key = f"_base_{s}"
-            if not hasattr(self, base_key):
-                # Première fois : on mémorise la valeur de base (sans items)
-                setattr(self, base_key, getattr(self, s, 0))
-            else:
-                # Les fois suivantes : on repart de la base mémorisée
-                setattr(self, s, getattr(self, base_key))
+            # Toujours mémoriser la valeur actuelle comme base (rechargée depuis DB)
+            setattr(self, f"_base_{s}", getattr(self, s, 0))
 
         # Reset bonuses items (accumulateurs propres)
         self.bonus_base_item = 0
@@ -8571,6 +8567,75 @@ async def gm_badge_retirer(interaction: discord.Interaction, joueur: discord.Mem
     embed = discord.Embed(title="🗑️ Titre Retiré", color=0x95a5a6)
     embed.description = f"Le titre **{badge}** a été retiré de **{p.nom}**."
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+#-------------------------------------------------------------------------------------------------------------------------------------------
+# --- COMMANDE ROLL ---
+#-------------------------------------------------------------------------------------------------------------------------------------------
+
+@bot.tree.command(name="roll", description="🎲 Lancer un ou plusieurs dés (ex: 2d6, 1d20, 3d8...)")
+@app_commands.describe(
+    des="Dés à lancer (ex: 1d20, 2d6, 3d8)",
+    modificateur="Modificateur fixe à ajouter ou soustraire (ex: +3 ou -2)",
+    raison="Raison du jet (optionnel, affiché dans le résultat)"
+)
+@app_commands.choices(des=[
+    app_commands.Choice(name="🎲 1d4",  value="1d4"),
+    app_commands.Choice(name="🎲 1d6",  value="1d6"),
+    app_commands.Choice(name="🎲 2d6",  value="2d6"),
+    app_commands.Choice(name="🎲 1d8",  value="1d8"),
+    app_commands.Choice(name="🎲 1d10", value="1d10"),
+    app_commands.Choice(name="🎲 1d12", value="1d12"),
+    app_commands.Choice(name="🎲 1d20", value="1d20"),
+    app_commands.Choice(name="🎲 2d20 (Avantage — garde le plus haut)", value="2d20adv"),
+    app_commands.Choice(name="🎲 2d20 (Désavantage — garde le plus bas)", value="2d20dis"),
+    app_commands.Choice(name="🎲 1d100", value="1d100"),
+    app_commands.Choice(name="🎲 4d6 (Stats — retire le plus bas)", value="4d6drop"),
+])
+async def roll(interaction: discord.Interaction, des: app_commands.Choice[str], modificateur: int = 0, raison: str = ""):
+    val = des.value
+    resultats = []
+    total = 0
+    mention = ""
+
+    if val == "2d20adv":
+        r1, r2 = random.randint(1,20), random.randint(1,20)
+        kept = max(r1, r2)
+        resultats = [r1, r2]
+        total = kept + modificateur
+        mention = f"✅ Avantage — garde **{kept}** (sur {r1}, {r2})"
+    elif val == "2d20dis":
+        r1, r2 = random.randint(1,20), random.randint(1,20)
+        kept = min(r1, r2)
+        resultats = [r1, r2]
+        total = kept + modificateur
+        mention = f"⚠️ Désavantage — garde **{kept}** (sur {r1}, {r2})"
+    elif val == "4d6drop":
+        rolls = [random.randint(1,6) for _ in range(4)]
+        dropped = min(rolls)
+        kept = [r for r in rolls]
+        total = sum(rolls) - dropped + modificateur
+        resultats = rolls
+        mention = f"🎯 Retire le plus bas ({dropped}) — Somme : {sum(rolls)-dropped}"
+    else:
+        nb, faces = val.split("d")
+        nb, faces = int(nb), int(faces)
+        resultats = [random.randint(1, faces) for _ in range(nb)]
+        total = sum(resultats) + modificateur
+        if nb == 1 and faces == 20:
+            if resultats[0] == 20: mention = "🌟 **CRITIQUE !**"
+            elif resultats[0] == 1: mention = "💀 **ÉCHEC CRITIQUE !**"
+
+    # Formatage
+    des_str = " + ".join([f"**{r}**" for r in resultats])
+    mod_str = f" {'+' if modificateur >= 0 else ''}{modificateur}" if modificateur != 0 else ""
+
+    embed = discord.Embed(title=f"🎲 {des.name}", color=0x9b59b6)
+    embed.description = f"{des_str}{mod_str} = **{total}**"
+    if mention: embed.description += f"\n{mention}"
+    if raison: embed.set_footer(text=f"Jet pour : {raison}")
+    embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+
+    await interaction.response.send_message(embed=embed)
 
 #-------------------------------------------------------------------------------------------------------------------------------------------
 # --- COMMANDE BACKUP ---
