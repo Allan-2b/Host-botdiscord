@@ -5773,6 +5773,12 @@ async def creation(interaction: discord.Interaction, nom: str, classe: app_comma
         if skill_base not in SKILLS_DB:
             skill_base = resolve_sort_ref(skill_base)
         if skill_base in SKILLS_DB: p.competences.append(skill_base); p.sauvegarder()
+
+        # Basculer automatiquement sur le nouveau personnage
+        conn2 = get_db_connection()
+        conn2.execute("INSERT OR REPLACE INTO sessions VALUES (?, ?)", (interaction.user.id, nom))
+        conn2.commit()
+        conn2.close()
         
         embed = discord.Embed(title="✨ Personnage Créé !", color=0x2ecc71)
         embed.add_field(name="Identité", value=f"**{p.nom}**\n{p.race} {p.classe.capitalize()}", inline=True)
@@ -5984,6 +5990,39 @@ async def mes_persos(interaction: discord.Interaction):
     embed.description = description
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+
+
+@bot.tree.command(name="changer_perso", description="Changer de personnage actif")
+@app_commands.describe(nom="Le personnage que vous voulez incarner")
+@app_commands.autocomplete(nom=my_perso_autocomplete)
+async def changer_perso(interaction: discord.Interaction, nom: str):
+    user_id = interaction.user.id
+    conn = get_db_connection()
+
+    existe = conn.execute("SELECT nom, classe, niveau FROM joueurs WHERE user_id = ? AND nom = ?", (user_id, nom)).fetchone()
+    if not existe:
+        conn.close()
+        return await interaction.response.send_message(
+            f"❌ Aucun personnage nommé **{nom}** trouvé. Utilisez `/mes_persos` pour voir vos personnages.",
+            ephemeral=True
+        )
+
+    conn.execute("INSERT OR REPLACE INTO sessions VALUES (?, ?)", (user_id, nom))
+    conn.commit()
+    conn.close()
+
+    p = Personnage.charger(user_id)
+    embed = discord.Embed(
+        title="🎭 Changement de Personnage",
+        description=f"Vous incarnez maintenant **{p.nom}** — Niveau {p.niveau} {p.classe.capitalize()} ({p.race}).",
+        color=0x9b59b6
+    )
+    embed.add_field(name="État", value=f"❤️ {p.pv_actuel}/{p.pv_max} PV", inline=True)
+    if p.classe == "mage":
+        embed.add_field(name="Mana", value=f"💙 {p.mana}/{p.mana_max}", inline=True)
+    elif p.classe == "guerrier":
+        embed.add_field(name="Tension", value=f"💢 {p.tension}", inline=True)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="delete_perso", description="⚠️ Supprimer DÉFINITIVEMENT un personnage")
