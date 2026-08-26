@@ -5910,7 +5910,7 @@ async def repos(interaction: discord.Interaction):
     p: Personnage = Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("Pas de fiche.", ephemeral=True)
     
-    # On ne recalcule PAS recalculer_derives() ici pour préserver les stats forcées via /gm_set_stat
+    # pv_max est déjà correct (calculé dans charger_equipement → recalculer_derives)
     p.pv_actuel = p.pv_max
     
     if p.mode_entrainement:
