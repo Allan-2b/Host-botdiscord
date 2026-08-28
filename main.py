@@ -5479,43 +5479,95 @@ class TechniquesSelect(discord.ui.Select):
             "Vampire": "Soif de Sang"
         }
 
-        # Catégories disponibles selon ce que le perso possède
-        categories = {}
-        if p.race in dons_raciaux:
-            categories["🧬 Don Racial"] = [f"🧬 {dons_raciaux[p.race]}"]
+        # Dictionnaire contenant les éléments du personnage classés par pallier
+        # Structure : { pallier_num: { "type_nom": [lignes...] } }
+        paliers_data = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}}
+        passifs_hors_palier = []
 
-        passifs, actifs, bonus_list, soins = [], [], [], []
+        # 1. Parcours des compétences réelles du joueur
         for skill_key in p.competences:
             if skill_key not in SKILLS_DB:
                 continue
             d = SKILLS_DB[skill_key]
-            nom = d["nom"]
-            cout = f" ({d['cout']} {d['cout_type']})" if d.get("cout", 0) > 0 else ""
+            nom = d.get("nom", skill_key)
+            cout_val = d.get("cout", 0)
+            cout_type = d.get("cout_type", "")
+            cout_txt = f" *({cout_val} {cout_type})*" if cout_val > 0 else ""
+            pal = d.get("pallier", 1)
+            
+            # Détermination de la sous-catégorie interne et icône
             if d.get("type") == "passif":
-                passifs.append(f"🛡️ {nom}")
+                cat_type = "✨ Passifs"
+                ligne = f"🛡️ **{nom}**"
             elif d.get("type") == "soin":
-                soins.append(f"💚 {nom}{cout}")
+                cat_type = "💚 Soins"
+                ligne = f"💚 **{nom}**{cout_txt}"
             elif "(BONUS)" in nom.upper():
-                bonus_list.append(f"⚡ {nom}{cout}")
+                cat_type = "⚡ Actions Bonus"
+                ligne = f"⚡ **{nom}**{cout_txt}"
+            elif d.get("type") == "defense":
+                cat_type = "🛡️ Défenses"
+                ligne = f"🛡️ **{nom}**{cout_txt}"
+            elif d.get("type") == "utilitaire":
+                cat_type = "📜 Utilitaires"
+                ligne = f"📜 **{nom}**{cout_txt}"
             else:
-                actifs.append(f"🔹 {nom}{cout}")
+                cat_type = "⚔️ Techniques Actives"
+                ligne = f"⚔️ **{nom}**{cout_txt}"
 
-        if passifs:   categories["✨ Passifs"] = passifs
-        if actifs:    categories["⚔️ Techniques actives"] = actifs
-        if bonus_list:categories["⚡ Actions Bonus"] = bonus_list
-        if soins:     categories["💚 Soins"] = soins
+            if 1 <= pal <= 5:
+                if cat_type not in paliers_data[pal]:
+                    paliers_data[pal][cat_type] = []
+                paliers_data[pal][cat_type].append(ligne)
+            else:
+                passifs_hors_palier.append(ligne)
+
+        # 2. Construction des catégories affichées dans le menu
+        categories = {}
+
+        # Don racial (si disponible)
+        if p.race in dons_raciaux:
+            categories["🧬 Don Racial"] = {
+                "Don Racial": [f"🧬 **{dons_raciaux[p.race]}** ({p.race})"]
+            }
+
+        noms_paliers = {
+            1: "📖 Pallier 1 (Initié)",
+            2: "⚔️ Pallier 2 (Apprenti)",
+            3: "🔥 Pallier 3 (Adepte)",
+            4: "🌪️ Pallier 4 (Maître)",
+            5: "👑 Pallier 5 (Légende)"
+        }
+
+        # N'ajouter QUE les palliers dans lesquels le joueur possède au moins 1 sort
+        for pal_num in range(1, 6):
+            total_sorts_pal = sum(len(lst) for lst in paliers_data[pal_num].values())
+            if total_sorts_pal > 0:
+                label_pal = noms_paliers.get(pal_num, f"Pallier {pal_num}")
+                categories[label_pal] = paliers_data[pal_num]
+
+        if passifs_hors_palier:
+            categories["✨ Autres Aptitudes"] = {"Passifs": passifs_hors_palier}
 
         self.categories = categories
 
-        options = [
-            discord.SelectOption(label=cat, value=cat, description=f"{len(lst)} élément(s)")
-            for cat, lst in categories.items()
-        ]
+        # 3. Génération des options du Select
+        options = []
+        for cat_label, contenu in categories.items():
+            total_items = sum(len(lst) for lst in contenu.values())
+            options.append(
+                discord.SelectOption(
+                    label=cat_label,
+                    value=cat_label,
+                    description=f"{total_items} sort(s) / compétence(s) débloqué(s)"
+                )
+            )
+
         if not options:
-            options = [discord.SelectOption(label="Aucune technique", value="none")]
+            options = [discord.SelectOption(label="Aucune technique apprise", value="none")]
 
         super().__init__(
-            placeholder="📖 Choisir une catégorie de techniques...",
+            placeholder="📖 Choisir un Pallier à consulter...",
             min_values=1,
             max_values=1,
             options=options[:25],
@@ -5524,25 +5576,34 @@ class TechniquesSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         choix = self.values[0]
         if choix == "none":
-            return await interaction.response.send_message("Aucune technique enregistrée.", ephemeral=True)
-        liste = self.categories.get(choix, [])
-        # Découpe en blocs de 1024 chars max (limite Discord field)
-        blocs = []
-        current = ""
-        for ligne in liste:
-            if len(current) + len(ligne) + 1 > 1020:
-                blocs.append(current)
-                current = ligne
+            return await interaction.response.send_message("❌ Aucune technique enregistrée sur ce personnage.", ephemeral=True)
+
+        contenu_palier = self.categories.get(choix, {})
+
+        embed = discord.Embed(title=f"📜 {choix}", color=0x9b59b6)
+        
+        # Affichage structuré sous-catégorie par sous-catégorie (Passifs, Actifs, Bonus, etc.)
+        for sous_cat, liste_sorts in contenu_palier.items():
+            texte_groupe = "\n".join(liste_sorts)
+            
+            # Découpage si trop long pour un seul field
+            if len(texte_groupe) > 1024:
+                blocs = []
+                curr = ""
+                for ligne in liste_sorts:
+                    if len(curr) + len(ligne) + 1 > 1020:
+                        blocs.append(curr)
+                        curr = ligne
+                    else:
+                        curr += ("\n" if curr else "") + ligne
+                if curr: blocs.append(curr)
+                
+                for i, b in enumerate(blocs):
+                    embed.add_field(name=f"{sous_cat} (suite)" if i > 0 else sous_cat, value=b, inline=False)
             else:
-                current += ("\n" if current else "") + ligne
-        if current:
-            blocs.append(current)
+                embed.add_field(name=sous_cat, value=texte_groupe, inline=False)
 
-        embed = discord.Embed(title=choix, color=0x9b59b6)
-        for i, bloc in enumerate(blocs):
-            embed.add_field(name="​" if i > 0 else choix, value=bloc, inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
 class FicheTechniquesView(discord.ui.View):
     def __init__(self, p):
@@ -5676,6 +5737,15 @@ async def fiche(interaction: discord.Interaction):
     argent_p = (p.monnaie % 100) // 10
     bronze_p = p.monnaie % 10
     embed.add_field(name="💰 Bourse", value=f"**{or_p}** 🥇 | **{argent_p}** 🥈 | **{bronze_p}** 🥉", inline=False)
+
+
+    # --- POINTS DISPONIBLES ---
+    points_txt = (
+        f"📊 **Stats :** `{p.points_stat}` | "
+        f"🎯 **Compétences :** `{p.points_comp}` | "
+        f"🧬 **Attributs :** `{p.points_attribut}`"
+    )
+    embed.add_field(name="✨ Points disponibles", value=points_txt, inline=False)
 
     # --- H. GRIMOIRE (SORTS) — affiché via menu déroulant ---
     # (Les techniques sont accessibles via le bouton ci-dessous)
