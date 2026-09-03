@@ -5154,14 +5154,33 @@ async def designation(interaction: discord.Interaction, cible: str):
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="mj_presage", description="🔮 [MJ] Valider le résultat d'un Présage Oracle")
-@app_commands.describe(joueur="Le joueur Oracle", verdict="Résultat du présage")
+def _gain_presage(p: "Personnage", verdict_value: str) -> int:
+    """Gain de Ferveur pour UN présage, selon le palier de passif Oracle du joueur."""
+    if verdict_value == "exact":
+        if "passif_oracle_inevitable" in p.competences: return 30
+        elif "passif_oracle_tisserand" in p.competences: return 25
+        elif "passif_oracle_futur" in p.competences: return 20
+        else: return 15
+    elif verdict_value == "partiel":
+        return 12 if "passif_oracle_tisserand" in p.competences else 7
+    return 0
+
+
+@bot.tree.command(name="mj_presage", description="🔮 [MJ] Valider le résultat d'un ou deux Présages Oracle")
+@app_commands.describe(
+    joueur="Le joueur Oracle", verdict="Résultat du présage",
+    verdict2="[Mémoire des Fils, rang 3+] Résultat du 2e présage du tour (optionnel)"
+)
 @app_commands.choices(verdict=[
     app_commands.Choice(name="✅ Exact (max Ferveur)", value="exact"),
     app_commands.Choice(name="〰️ Partiel (moitié Ferveur)", value="partiel"),
     app_commands.Choice(name="❌ Faux (0 Ferveur)", value="faux"),
+], verdict2=[
+    app_commands.Choice(name="✅ Exact (max Ferveur)", value="exact"),
+    app_commands.Choice(name="〰️ Partiel (moitié Ferveur)", value="partiel"),
+    app_commands.Choice(name="❌ Faux (0 Ferveur)", value="faux"),
 ])
-async def mj_presage(interaction: discord.Interaction, joueur: discord.Member, verdict: app_commands.Choice[str]):
+async def mj_presage(interaction: discord.Interaction, joueur: discord.Member, verdict: app_commands.Choice[str], verdict2: app_commands.Choice[str] = None):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("🚫 Réservé au MJ.", ephemeral=True)
 
@@ -5170,30 +5189,41 @@ async def mj_presage(interaction: discord.Interaction, joueur: discord.Member, v
     if "oracle" not in p.sous_classes_unlocked:
         return await interaction.response.send_message("❌ Ce joueur n'est pas un **Oracle**.", ephemeral=True)
 
-    # Calcul du gain selon palier
-    if verdict.value == "exact":
-        if "passif_oracle_inevitable" in p.competences: gain = 30
-        elif "passif_oracle_tisserand" in p.competences: gain = 25
-        elif "passif_oracle_futur" in p.competences: gain = 20
-        else: gain = 15
-    elif verdict.value == "partiel":
-        gain = 12 if "passif_oracle_tisserand" in p.competences else 7
+    a_memoire = "passif_oracle_memoire" in p.competences
+    if verdict2 and not a_memoire:
+        return await interaction.response.send_message(
+            "❌ Ce joueur n'a pas **[Mémoire des Fils]** (rang 3) : un seul Présage par tour.", ephemeral=True
+        )
+
+    les_deux_exacts = bool(verdict2) and verdict.value == "exact" and verdict2.value == "exact"
+    if les_deux_exacts:
+        # Bonus combo de [Mémoire des Fils] : les 2 Présages exacts remplacent le cumul individuel
+        gain = 35
     else:
-        gain = 0
+        gain = _gain_presage(p, verdict.value) + (_gain_presage(p, verdict2.value) if verdict2 else 0)
 
     p.ferveur += gain
     # Poser le flag _presage_exact pour activer les bonus conditionnels des sorts Oracle
-    if verdict.value == "exact":
+    # (dès qu'au moins un des présages du tour est exact)
+    au_moins_un_exact = verdict.value == "exact" or (verdict2 is not None and verdict2.value == "exact")
+    if au_moins_un_exact:
         # duree:2 pour survivre au /tour du round courant et être actif au tour suivant
         p.effets["_presage_exact"] = {"duree": 999, "valeur": 1}
     else:
         p.effets.pop("_presage_exact", None)
     p.sauvegarder()
 
-    couleur = 0x2ecc71 if verdict.value == "exact" else (0xf39c12 if verdict.value == "partiel" else 0xe74c3c)
-    embed = discord.Embed(title="🔮 Validation de Présage", color=couleur)
-    embed.description = f"Présage de {joueur.mention} : **{verdict.name}**"
-    embed.add_field(name="Récompense", value=f"+**{gain}** Ferveur" if gain > 0 else "Aucune Ferveur gagnée.", inline=False)
+    couleur = 0x2ecc71 if au_moins_un_exact else (0xf39c12 if verdict.value == "partiel" else 0xe74c3c)
+    embed = discord.Embed(title="🔮 Validation de Présage" + (" (x2)" if verdict2 else ""), color=couleur)
+    if verdict2:
+        embed.description = f"Présages de {joueur.mention} : **{verdict.name}** + **{verdict2.name}**"
+        if les_deux_exacts:
+            embed.add_field(name="Récompense", value="🔮 **[Mémoire des Fils]** — Les 2 Présages exacts : **+35** Ferveur !", inline=False)
+        else:
+            embed.add_field(name="Récompense", value=f"+**{gain}** Ferveur" if gain > 0 else "Aucune Ferveur gagnée.", inline=False)
+    else:
+        embed.description = f"Présage de {joueur.mention} : **{verdict.name}**"
+        embed.add_field(name="Récompense", value=f"+**{gain}** Ferveur" if gain > 0 else "Aucune Ferveur gagnée.", inline=False)
     embed.add_field(name="Ferveur Totale", value=f"🙏 **{p.ferveur}**", inline=False)
     await interaction.response.send_message(embed=embed)
 
@@ -7984,6 +8014,8 @@ async def set_autocomplete(interaction: discord.Interaction, current: str):
     bonus_valeur="Valeur du bonus principal (ex: 2 pour +2)",
     bonus_type2="Bonus secondaire (optionnel)",
     bonus_valeur2="Valeur du bonus secondaire",
+    bonus_type3="Bonus tertiaire (optionnel)",
+    bonus_valeur3="Valeur du bonus tertiaire",
     necessite_etude="L'objet doit-il être étudié avant de fonctionner ?",
     set_ref="(Optionnel) Associer directement à un set existant"
 )
@@ -8053,6 +8085,30 @@ async def set_autocomplete(interaction: discord.Interaction, current: str):
         app_commands.Choice(name="🗣️ Oral",                value="oral"),
         app_commands.Choice(name="💪 Force RP",            value="force_rp"),
         app_commands.Choice(name="🌿 Survie",              value="survie"),
+    ],
+    bonus_type3=[
+        app_commands.Choice(name="⚔️ Physique (PHY)",     value="phy"),
+        app_commands.Choice(name="🔮 Esprit (ESP)",        value="esp"),
+        app_commands.Choice(name="💨 Agilité (AGI)",       value="agi"),
+        app_commands.Choice(name="🛡️ Constitution (CON)",  value="const"),
+        app_commands.Choice(name="✝️ Foi (FOI)",           value="foi"),
+        app_commands.Choice(name="📖 Sagesse (SAG)",       value="sag"),
+        app_commands.Choice(name="🧠 Intelligence (INT)",  value="int_stat"),
+        app_commands.Choice(name="🔴 PV Max",              value="pv_max"),
+        app_commands.Choice(name="🔵 Mana Max",            value="mana_max"),
+        app_commands.Choice(name="🪨 Robustesse (ROB)",    value="rob"),
+        app_commands.Choice(name="🎲 +Base (dégâts)",      value="bonus_base_item"),
+        app_commands.Choice(name="🎰 +Pièces (dés bonus)", value="bonus_pieces_item"),
+        app_commands.Choice(name="📜 Versets Max",         value="versets_max"),
+        app_commands.Choice(name="🗡️ Discrétion",          value="discretion"),
+        app_commands.Choice(name="📚 Histoire",             value="histoire"),
+        app_commands.Choice(name="🏥 Médecine",            value="medecine"),
+        app_commands.Choice(name="⚗️ Sciences",            value="sciences"),
+        app_commands.Choice(name="🙏 Religion",            value="religion"),
+        app_commands.Choice(name="🤸 Acrobatie",           value="acrobatie"),
+        app_commands.Choice(name="🗣️ Oral",                value="oral"),
+        app_commands.Choice(name="💪 Force RP",            value="force_rp"),
+        app_commands.Choice(name="🌿 Survie",              value="survie"),
     ]
 )
 @app_commands.autocomplete(set_ref=set_autocomplete)
@@ -8060,6 +8116,7 @@ async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, sl
                         rarete: app_commands.Choice[str] = None,
                         bonus_type: app_commands.Choice[str] = None, bonus_valeur: int = 0,
                         bonus_type2: app_commands.Choice[str] = None, bonus_valeur2: int = 0,
+                        bonus_type3: app_commands.Choice[str] = None, bonus_valeur3: int = 0,
                         necessite_etude: bool = False, set_ref: str = None):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
@@ -8074,6 +8131,8 @@ async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, sl
         bonus_dict[bonus_type.value] = bonus_valeur
     if bonus_type2 and bonus_valeur2:
         bonus_dict[bonus_type2.value] = bonus_valeur2
+    if bonus_type3 and bonus_valeur3:
+        bonus_dict[bonus_type3.value] = bonus_valeur3
     bonus_json = json.dumps(bonus_dict)
 
     ref_clean = ref.lower()
