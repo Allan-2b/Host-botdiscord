@@ -3493,9 +3493,14 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
     if not p_cible_clash: return await interaction.followup.send("❌ Cible introuvable.", ephemeral=True)
     cible_user_id = p_cible_clash.user_id
 
-    # Blocage auto-ciblage — sauf pour un GM qui joue deux fiches distinctes
-    if cible_user_id == interaction.user.id:
-        if not (is_gm(interaction.user.id) and personnage):
+    # Blocage auto-ciblage : on compare la fiche précise (user_id + nom), pas
+    # seulement le user_id — sinon un MJ qui gère plusieurs PNJ sous son propre
+    # compte ne peut jamais les faire s'affronter sans forcer "personnage",
+    # même quand son personnage actif (via la session) est déjà le bon.
+    if p_cible_clash.user_id == interaction.user.id:
+        if p_attaquant.nom == p_cible_clash.nom:
+            return await interaction.followup.send("❌ Cible invalide (vous ne pouvez pas vous cibler vous-même).", ephemeral=True)
+        elif not is_gm(interaction.user.id):
             return await interaction.followup.send("❌ Cible invalide.", ephemeral=True)
     if cible_user_id in PENDING_CLASHES: return await interaction.followup.send(f"❌ Déjà défié.", ephemeral=True)
 
