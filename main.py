@@ -244,6 +244,8 @@ def init_db():
     except: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN gm_pv_max_bonus INTEGER DEFAULT 0")
     except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN versets_max_bonus_racial INTEGER DEFAULT 0")
+    except: pass
 
     conn.commit()
     conn.close()
@@ -1116,6 +1118,7 @@ class Personnage:
         self.serment_actif = 0
         self.serment_bonus = 0
         self.mana_bonus_racial = 0
+        self.versets_max_bonus_racial = 0
         self.bonus_base_item = 0
         self.bonus_pieces_item = 0
         self.mana_max_bonus_item = 0
@@ -1171,7 +1174,7 @@ class Personnage:
             self.mana_max = (self.int_stat * 8) + 10 + getattr(self, 'mana_bonus_racial', 0) + getattr(self, 'mana_max_bonus_item', 0) 
         elif self.classe == "pretre":
             self.pv_max = 32 + ((self.niveau - 1) * 4) + getattr(self, 'pv_max_bonus_item', 0)
-            self.versets_max = self.sag 
+            self.versets_max = self.sag + getattr(self, 'versets_max_bonus_racial', 0)
         if self.race == "Féral":
             self.pv_max -= 5
         # Passifs V4 permanents
@@ -1208,27 +1211,28 @@ class Personnage:
              concentre, serment_actif, serment_bonus, posture_active,
              designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges, mana_bonus_racial,
              bonus_base_item, bonus_pieces_item, mana_max_bonus_item, pv_max_bonus_item,
-             gm_mana_max_bonus, gm_pv_max_bonus)
+             gm_mana_max_bonus, gm_pv_max_bonus, versets_max_bonus_racial)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
-              self.tension, self.ferveur, self.versets, 
+              self.tension, self.ferveur, self.versets,
               getattr(self, "_base_phy", self.phy), getattr(self, "_base_const", self.const), getattr(self, "_base_agi", self.agi),
               getattr(self, "_base_esp", self.esp), getattr(self, "_base_int_stat", self.int_stat), getattr(self, "_base_foi", self.foi), getattr(self, "_base_sag", self.sag),
               self.points_stat, self.points_comp, self.points_attribut, skills_json,
-              self.oral, self.force_rp, self.survie, self.histoire, 
-              self.sciences, self.medecine, self.religion, self.discretion, self.acrobatie,
-              self.alias, self.description, self.image_url, 
+              getattr(self, "_base_oral", self.oral), getattr(self, "_base_force_rp", self.force_rp), getattr(self, "_base_survie", self.survie), getattr(self, "_base_histoire", self.histoire),
+              getattr(self, "_base_sciences", self.sciences), getattr(self, "_base_medecine", self.medecine), getattr(self, "_base_religion", self.religion), getattr(self, "_base_discretion", self.discretion), getattr(self, "_base_acrobatie", self.acrobatie),
+              self.alias, self.description, self.image_url,
               self.mode_entrainement, self.snapshot_entrainement, sous_classes_json, effets_json, cooldowns_json,
-              self.monnaie, self.robustesse, self.festin, charges_json,
+              self.monnaie, getattr(self, "_base_robustesse", self.robustesse), self.festin, charges_json,
               self.passe_active, self.parade_absorb, self.last_action_type, self.fureur_tribale_used,
               self.concentre, self.serment_actif, self.serment_bonus, self.posture_active,
               self.designation_target_id, self.designation_stacks, self.sentence_target_id, json.dumps(self.sentence_targets), self.passe_count,
               json.dumps(self.badges), getattr(self, 'mana_bonus_racial', 0),
               getattr(self, 'bonus_base_item', 0), getattr(self, 'bonus_pieces_item', 0),
               getattr(self, 'mana_max_bonus_item', 0), getattr(self, 'pv_max_bonus_item', 0),
-              getattr(self, 'gm_mana_max_bonus', 0), getattr(self, 'gm_pv_max_bonus', 0)))
+              getattr(self, 'gm_mana_max_bonus', 0), getattr(self, 'gm_pv_max_bonus', 0),
+              getattr(self, 'versets_max_bonus_racial', 0)))
         
         # Ne mettre à jour la session que si ce personnage est déjà le personnage actif
         # Évite d'écraser la session du MJ quand il sauvegarde un PNJ/monstre en combat
@@ -1303,6 +1307,9 @@ class Personnage:
         except (json.JSONDecodeError, TypeError): p.badges = []
 
         p.charger_equipement()
+        # Recalcule PV/Mana/Versets Max à chaque chargement pour refléter
+        # les stats de base (dont Sagesse) + bonus d'items/race à jour.
+        p.recalculer_derives()
         return p
 
     @staticmethod
@@ -1357,6 +1364,9 @@ class Personnage:
         try: p.badges = json.loads(row['badges']) if 'badges' in row.keys() and row['badges'] else []
         except (json.JSONDecodeError, TypeError): p.badges = []
         p.charger_equipement()
+        # Recalcule PV/Mana/Versets Max à chaque chargement pour refléter
+        # les stats de base (dont Sagesse) + bonus d'items/race à jour.
+        p.recalculer_derives()
         return p
 
     def ajouter_effet(self, code, duree, puissance=None):
@@ -1465,15 +1475,25 @@ class Personnage:
                 if res: messages.append(res)
         return "\n".join(messages)
 
+    def _inc_stat_base(self, nom_stat, delta):
+        """Incrémente une stat ET sa base mémorisée (_base_X) du même delta.
+        sauvegarder() persiste _base_X (valeur hors bonus d'items) et non X
+        directement : sans ça, tout gain de stat racial appliqué ici est
+        silencieusement perdu à la sauvegarde qui suit (écrasé par l'ancienne base)."""
+        setattr(self, nom_stat, getattr(self, nom_stat, 0) + delta)
+        base_key = f"_base_{nom_stat}"
+        if hasattr(self, base_key):
+            setattr(self, base_key, getattr(self, base_key) + delta)
+
     def appliquer_pallier_race(self, niveau_palier=None):
         """Les bonus tous les 3 niveaux"""
         niv_affiche = niveau_palier if niveau_palier is not None else self.niveau
         msg = f"🧬 **Évolution Raciale ({self.race}) au niveau {niv_affiche} !**"
-        
+
         if self.race == "Elfe":
             if self.classe == "mage": self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 3
-            elif self.classe == "guerrier": self.acrobatie += 1; self.religion += 1; msg += " 🌿 +1 Acrobatie (Initiative), +1 Religion !"
-            elif self.classe == "pretre": self.medecine += 1; self.religion += 1
+            elif self.classe == "guerrier": self._inc_stat_base("acrobatie", 1); self._inc_stat_base("religion", 1); msg += " 🌿 +1 Acrobatie (Initiative), +1 Religion !"
+            elif self.classe == "pretre": self._inc_stat_base("medecine", 1); self._inc_stat_base("religion", 1)
 
         elif self.race == "Humain":
             if self.classe == "mage": pass
@@ -1483,9 +1503,9 @@ class Personnage:
             elif self.classe == "pretre": self.points_comp += 1
 
         elif self.race == "Nain":
-            if self.classe == "mage": self.esp += 1
-            elif self.classe == "guerrier": self.const += 1; self.phy += 1
-            elif self.classe == "pretre": self.const += 1
+            if self.classe == "mage": self._inc_stat_base("esp", 1)
+            elif self.classe == "guerrier": self._inc_stat_base("const", 1); self._inc_stat_base("phy", 1)
+            elif self.classe == "pretre": self._inc_stat_base("const", 1)
 
         elif self.race == "Drakéide":
             # +1 aux dégâts de base (bonus_base_item) à chaque pallier
@@ -1494,24 +1514,35 @@ class Personnage:
 
         elif self.race == "Féral":
             if self.classe == "mage":
-                self.agi += 1
-                self.acrobatie += 1      
+                self._inc_stat_base("agi", 1)
+                self._inc_stat_base("acrobatie", 1)
             elif self.classe == "guerrier":
-                self.phy += 1
-                self.acrobatie += 1     
+                self._inc_stat_base("phy", 1)
+                self._inc_stat_base("acrobatie", 1)
             elif self.classe == "pretre":
-                self.agi += 1     
-                self.acrobatie += 1     
+                self._inc_stat_base("agi", 1)
+                self._inc_stat_base("acrobatie", 1)
 
         elif self.race == "Céleste":
             if self.classe == "mage": self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 2
             elif self.classe == "guerrier": self.tension += 1; msg += " ✨ +1 Tension (bonus de départ permanent) !"
-            elif self.classe == "pretre": self.versets_max += 1; self.versets += 1
+            elif self.classe == "pretre":
+                # Stocké dans versets_max_bonus_racial pour survivre à recalculer_derives()
+                self.versets_max_bonus_racial = getattr(self, 'versets_max_bonus_racial', 0) + 1
+                self.versets += 1
 
         elif self.race == "Vampire":
             if self.classe == "mage": self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 4; msg += " 🧛 +4 Mana Max !"
-            elif self.classe == "guerrier": self.pv_max += 3; self.pv_actuel += 3; msg += " 🧛 +3 PV Max (Régénération vampirique) !"
-            elif self.classe == "pretre": self.pv_max += 2; self.pv_actuel += 2; self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 2; msg += " 🧛 +2 PV Max, +2 Mana Max !"
+            elif self.classe == "guerrier":
+                # Stocké dans gm_pv_max_bonus pour survivre à recalculer_derives()
+                self.gm_pv_max_bonus = getattr(self, "gm_pv_max_bonus", 0) + 3
+                self.pv_actuel += 3
+                msg += " 🧛 +3 PV Max (Régénération vampirique) !"
+            elif self.classe == "pretre":
+                self.gm_pv_max_bonus = getattr(self, "gm_pv_max_bonus", 0) + 2
+                self.pv_actuel += 2
+                self.mana_bonus_racial = getattr(self, 'mana_bonus_racial', 0) + 2
+                msg += " 🧛 +2 PV Max, +2 Mana Max !"
 
         self.recalculer_derives()
         return msg
@@ -2368,6 +2399,10 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
     # -- LOTUS : réduction Robustesse de la cible (Frappe de l'Éveil Finale) --
     if "reduce_rob_cible" in data and defenseur:
         red_rob = data["reduce_rob_cible"]
+        # On réduit la base ET la valeur affichée : sauvegarder() persiste _base_robustesse
+        # (valeur hors bonus d'items), donc si on ne réduit que le total on double-compte
+        # le bonus d'item au prochain chargement.
+        defenseur._base_robustesse = max(0, getattr(defenseur, "_base_robustesse", defenseur.robustesse) - red_rob)
         defenseur.robustesse = max(0, getattr(defenseur, "robustesse", 0) - red_rob)
         defenseur.sauvegarder()
         msg.append(f"🌸 **Frappe de l'Éveil** : Robustesse de la cible réduite de {red_rob} !")
@@ -5372,23 +5407,25 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
     if valeur < 0 and "pv" in code_stat:
         valeur = 0
 
-    # Si on modifie mana_max ou pv_max directement, stocker le delta dans bonus_item
-    # pour que recalculer_derives le prenne en compte et ne l'écrase pas
+    # Si on modifie mana_max ou pv_max directement, stocker le delta dans gm_*_bonus
+    # (et non *_bonus_item, qui est écrasé et recalculé depuis les items équipés
+    # à chaque chargement du personnage — voir charger_equipement) pour que la
+    # modification survive au prochain chargement.
     if code_stat == "mana_max":
         p.recalculer_derives()  # calcule la base actuelle
         base_actuelle = p.mana_max
         delta = valeur - base_actuelle
-        p.mana_max_bonus_item = getattr(p, 'mana_max_bonus_item', 0) + delta
+        p.gm_mana_max_bonus = getattr(p, 'gm_mana_max_bonus', 0) + delta
         p.recalculer_derives()
-        code_stat = "mana_max_bonus_item"
+        code_stat = "gm_mana_max_bonus"
         ancienne_valeur = p.mana_max
     elif code_stat == "pv_max":
         p.recalculer_derives()
         base_actuelle = p.pv_max
         delta = valeur - base_actuelle
-        p.pv_max_bonus_item = getattr(p, 'pv_max_bonus_item', 0) + delta
+        p.gm_pv_max_bonus = getattr(p, 'gm_pv_max_bonus', 0) + delta
         p.recalculer_derives()
-        code_stat = "pv_max_bonus_item"
+        code_stat = "gm_pv_max_bonus"
         ancienne_valeur = p.pv_max
     elif code_stat in ("bonus_pieces_item", "bonus_base_item"):
         # Ces valeurs sont recalculées par charger_equipement à chaque fois
@@ -5397,11 +5434,15 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
         setattr(p, offset_key, valeur)
         setattr(p, code_stat, valeur)
     else:
-        setattr(p, code_stat, valeur)
-        # Mettre aussi à jour la valeur de base mémorisée pour éviter le stacking items
+        # "valeur" est le TOTAL affiché voulu (base + bonus d'items éventuels).
+        # On isole la part venant des items pour ne mettre à jour que la base
+        # mémorisée — sinon le bonus d'item est réabsorbé dans la base et se
+        # remet à s'additionner par-dessus à chaque rechargement.
         base_key = f"_base_{code_stat}"
         if hasattr(p, base_key):
-            setattr(p, base_key, valeur)
+            bonus_item_actuel = getattr(p, code_stat, valeur) - getattr(p, base_key)
+            setattr(p, base_key, valeur - bonus_item_actuel)
+        setattr(p, code_stat, valeur)
 
     # Si on modifie les PV Max, on ne touche pas aux PV actuels (sauf si actuels > max)
     if p.pv_actuel > p.pv_max:
@@ -5410,7 +5451,7 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
         p.mana = p.mana_max
 
     # Si on modifie une stat qui affecte les dérivés, recalculer
-    if code_stat in ['int_stat', 'sag', 'mana_max_bonus_item', 'pv_max_bonus_item', 'mana_bonus_racial']:
+    if code_stat in ['int_stat', 'sag', 'gm_mana_max_bonus', 'gm_pv_max_bonus', 'mana_bonus_racial']:
         p.recalculer_derives()
     p.sauvegarder()
 
@@ -6732,10 +6773,18 @@ async def ameliorer(interaction: discord.Interaction, stat: app_commands.Choice[
     # Application
     stat_code = stat.value
     valeur_actuelle = getattr(p, stat_code)
-    setattr(p, stat_code, valeur_actuelle + point)
-    
+    nouvelle_valeur = valeur_actuelle + point
+    setattr(p, stat_code, nouvelle_valeur)
+    # On incrémente aussi la valeur de base mémorisée du même delta (et non en la
+    # remplaçant par le total affiché, qui peut déjà inclure un bonus d'item) :
+    # sauvegarder() persiste _base_X et non X directement, pour ne pas re-additionner
+    # les bonus d'items à chaque chargement — sans ça, l'investissement de points était perdu.
+    base_key = f"_base_{stat_code}"
+    if hasattr(p, base_key):
+        setattr(p, base_key, getattr(p, base_key) + point)
+
     p.points_stat -= point
-    
+
     # Recalculer les dérivés (PV, Mana, etc.) car Const/Int/Sag peuvent changer
     p.recalculer_derives()
     p.sauvegarder()
@@ -6769,13 +6818,21 @@ async def ameliorer_attribut(interaction: discord.Interaction, attribut: app_com
     # Application
     attr_code = attribut.value
     valeur_actuelle = getattr(p, attr_code)
-    
+    nouvelle_valeur = valeur_actuelle + point
+
     # On ajoute les points
-    setattr(p, attr_code, valeur_actuelle + point)
-    
+    setattr(p, attr_code, nouvelle_valeur)
+    # On incrémente aussi la valeur de base mémorisée du même delta (et non en la
+    # remplaçant par le total affiché, qui peut déjà inclure un bonus d'item) :
+    # sauvegarder() persiste _base_X et non X directement, pour ne pas re-additionner
+    # les bonus d'items à chaque chargement — sans ça, l'investissement de points était perdu.
+    base_key = f"_base_{attr_code}"
+    if hasattr(p, base_key):
+        setattr(p, base_key, getattr(p, base_key) + point)
+
     # On retire du pool "points_attribut" (et non points_stat)
     p.points_attribut -= point
-    
+
     p.sauvegarder()
 
     await interaction.response.send_message(f"✅ **{attribut.name}** augmenté de +{point} ! (Nouveau score : {valeur_actuelle + point})\nPoints d'attributs restants : {p.points_attribut}")
@@ -7492,6 +7549,15 @@ async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choic
         p.pv_actuel = valeur
     else:
         # Modification directe pour les autres stats (phy, esp, etc.)
+        # "valeur" est le TOTAL affiché voulu (base + bonus d'items éventuels).
+        # sauvegarder() persiste _base_X (valeur hors bonus d'items) et non X
+        # directement — il faut isoler la part d'item et ne mettre à jour que la
+        # base, sinon le bonus d'item est réabsorbé et se remet à s'additionner
+        # par-dessus à chaque rechargement (ou la modification est simplement perdue).
+        base_key = f"_base_{code_stat}"
+        if hasattr(p, base_key):
+            bonus_item_actuel = getattr(p, code_stat, valeur) - getattr(p, base_key)
+            setattr(p, base_key, valeur - bonus_item_actuel)
         setattr(p, code_stat, valeur)
 
     p.sauvegarder()
