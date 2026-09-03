@@ -2463,6 +2463,12 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
     if data.get("double_dmg_si_designation") and defenseur and attaquant.designation_target_id == defenseur.user_id:
         degats_finaux *= 2
         msg.append("🎯 **Désignation** : Dégâts doublés !")
+        # Consomme la Désignation (contrairement à consomme_designation_bonus,
+        # ce flag n'enlevait jamais le marquage de la cible)
+        attaquant.designation_stacks -= 1
+        if attaquant.designation_stacks <= 0:
+            attaquant.designation_target_id = 0
+            msg.append("🎯 **Désignation consommée** : la cible n'est plus marquée.")
 
     # -- LOGE : consomme_designation_bonus (Perturbation Neurale) --
     if data.get("consomme_designation_bonus") and defenseur and attaquant.designation_target_id == defenseur.user_id:
