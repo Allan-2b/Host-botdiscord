@@ -250,6 +250,10 @@ def init_db():
     except: pass
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN gm_bonus_pieces_item INTEGER DEFAULT 0")
     except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN gm_pv_max_bonus_item INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN gm_mana_max_bonus_item INTEGER DEFAULT 0")
+    except: pass
 
     conn.commit()
     conn.close()
@@ -1131,6 +1135,8 @@ class Personnage:
         self.gm_pv_max_bonus = 0
         self.gm_bonus_base_item = 0
         self.gm_bonus_pieces_item = 0
+        self.gm_pv_max_bonus_item = 0
+        self.gm_mana_max_bonus_item = 0
         self.posture_active = 0
         self.designation_target_id = 0
         self.designation_stacks = 0
@@ -1218,9 +1224,9 @@ class Personnage:
              designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges, mana_bonus_racial,
              bonus_base_item, bonus_pieces_item, mana_max_bonus_item, pv_max_bonus_item,
              gm_mana_max_bonus, gm_pv_max_bonus, versets_max_bonus_racial,
-             gm_bonus_base_item, gm_bonus_pieces_item)
+             gm_bonus_base_item, gm_bonus_pieces_item, gm_pv_max_bonus_item, gm_mana_max_bonus_item)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
               self.tension, self.ferveur, self.versets,
@@ -1240,7 +1246,8 @@ class Personnage:
               getattr(self, 'mana_max_bonus_item', 0), getattr(self, 'pv_max_bonus_item', 0),
               getattr(self, 'gm_mana_max_bonus', 0), getattr(self, 'gm_pv_max_bonus', 0),
               getattr(self, 'versets_max_bonus_racial', 0),
-              getattr(self, 'gm_bonus_base_item', 0), getattr(self, 'gm_bonus_pieces_item', 0)))
+              getattr(self, 'gm_bonus_base_item', 0), getattr(self, 'gm_bonus_pieces_item', 0),
+              getattr(self, 'gm_pv_max_bonus_item', 0), getattr(self, 'gm_mana_max_bonus_item', 0)))
         
         # Ne mettre à jour la session que si ce personnage est déjà le personnage actif
         # Évite d'écraser la session du MJ quand il sauvegarde un PNJ/monstre en combat
@@ -1469,6 +1476,8 @@ class Personnage:
         # depuis les objets équipés, donc ils survivent aux rechargements.
         self.bonus_base_item += getattr(self, 'gm_bonus_base_item', 0)
         self.bonus_pieces_item += getattr(self, 'gm_bonus_pieces_item', 0)
+        self.pv_max_bonus_item += getattr(self, 'gm_pv_max_bonus_item', 0)
+        self.mana_max_bonus_item += getattr(self, 'gm_mana_max_bonus_item', 0)
 
         # Bonus de sets : descriptions texte uniquement, pas de bonus mécanique automatique
         conn.close()
@@ -5453,43 +5462,49 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
     if valeur < 0 and "pv" in code_stat:
         valeur = 0
 
-    # Si on modifie mana_max ou pv_max directement, stocker le delta dans gm_*_bonus
-    # (et non *_bonus_item, qui est écrasé et recalculé depuis les items équipés
-    # à chaque chargement du personnage — voir charger_equipement) pour que la
-    # modification survive au prochain chargement.
-    if code_stat in ("mana_max", "mana_max_bonus_item"):
-        # "Mana Maximum" et "Bonus Mana Max (items)" pointent vers le même total
-        # affiché : les deux sont traités identiquement, sinon utiliser l'un
-        # après l'autre les fait s'écraser/s'accumuler de façon incohérente.
-        p.recalculer_derives()  # calcule la base actuelle
+    # PV Max / Mana Max se décomposent en 2 couches indépendantes, chacune avec
+    # son propre bonus persistant (survit au rechargement, contrairement à
+    # *_bonus_item qui est recalculé depuis les objets équipés — voir
+    # charger_equipement) :
+    #  - "PV/Mana Maximum" = le TOTAL affiché voulu → gm_pv/mana_max_bonus
+    #  - "Bonus PV/Mana Max (items)" = seulement la part attribuée aux objets
+    #    → gm_pv/mana_max_bonus_item, qui vient s'ajouter à pv/mana_max_bonus_item
+    # Les deux se combinent naturellement dans le total (base + item + gm),
+    # sans s'écraser l'un l'autre.
+    if code_stat == "mana_max":
+        p.recalculer_derives()  # calcule le total actuel
         base_actuelle = p.mana_max
         delta = valeur - base_actuelle
         p.gm_mana_max_bonus = getattr(p, 'gm_mana_max_bonus', 0) + delta
-        p.recalculer_derives()
+        ancienne_valeur = base_actuelle
         code_stat = "gm_mana_max_bonus"
-        ancienne_valeur = p.mana_max
-    elif code_stat in ("pv_max", "pv_max_bonus_item"):
+    elif code_stat == "pv_max":
         p.recalculer_derives()
         base_actuelle = p.pv_max
         delta = valeur - base_actuelle
         p.gm_pv_max_bonus = getattr(p, 'gm_pv_max_bonus', 0) + delta
-        p.recalculer_derives()
+        ancienne_valeur = base_actuelle
         code_stat = "gm_pv_max_bonus"
-        ancienne_valeur = p.pv_max
-    elif code_stat in ("bonus_pieces_item", "bonus_base_item"):
-        # Ce champ est recalculé depuis les objets équipés à chaque chargement
-        # (voir charger_equipement) : "valeur" est le total voulu, on stocke
-        # l'écart dans le bonus persistant correspondant (gm_*) pour qu'il
-        # survive au prochain chargement, au lieu d'écraser un champ qui sera
-        # de toute façon effacé. p.<code_stat> reflète déjà le total effectif
-        # actuel (item + bonus manuel précédent), donc ancienne_valeur est correcte.
-        gm_field = "gm_bonus_pieces_item" if code_stat == "bonus_pieces_item" else "gm_bonus_base_item"
+    elif code_stat in ("mana_max_bonus_item", "pv_max_bonus_item", "bonus_pieces_item", "bonus_base_item"):
+        # Ces 4 champs représentent la part "objets" d'une stat, recalculée
+        # depuis les objets équipés à chaque chargement (voir charger_equipement) :
+        # "valeur" est le total voulu pour cette part, on stocke l'écart dans le
+        # bonus persistant correspondant (gm_*) pour qu'il survive au prochain
+        # chargement. p.<code_stat> reflète déjà le total effectif actuel
+        # (item auto-détecté + bonus manuel précédent), donc ancienne_valeur est correcte.
+        gm_field = {
+            "mana_max_bonus_item": "gm_mana_max_bonus_item",
+            "pv_max_bonus_item": "gm_pv_max_bonus_item",
+            "bonus_pieces_item": "gm_bonus_pieces_item",
+            "bonus_base_item": "gm_bonus_base_item",
+        }[code_stat]
         valeur_actuelle = getattr(p, code_stat, 0)
         delta = valeur - valeur_actuelle
         setattr(p, gm_field, getattr(p, gm_field, 0) + delta)
         # Pas besoin de recharger l'équipement (ça réinitialiserait aussi les
         # snapshots _base_X d'autres stats) : on met juste à jour la valeur
-        # affichée directement au total demandé.
+        # affichée directement au total demandé, puis on recalcule PV/Mana Max
+        # si besoin pour que la couche "item" impacte bien le total.
         setattr(p, code_stat, valeur)
         ancienne_valeur = valeur_actuelle
         code_stat = gm_field
@@ -5504,15 +5519,17 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
             setattr(p, base_key, valeur - bonus_item_actuel)
         setattr(p, code_stat, valeur)
 
-    # Si on modifie les PV Max, on ne touche pas aux PV actuels (sauf si actuels > max)
+    # Si on modifie une stat qui affecte les dérivés, recalculer (PV Max/Mana Max
+    # ne sont à jour qu'après cet appel — voir les branches ci-dessus)
+    if code_stat in ['int_stat', 'sag', 'gm_mana_max_bonus', 'gm_pv_max_bonus',
+                      'gm_mana_max_bonus_item', 'gm_pv_max_bonus_item', 'mana_bonus_racial']:
+        p.recalculer_derives()
+
+    # PV actuels/Mana ne doivent jamais dépasser le max (recalculé ci-dessus si besoin)
     if p.pv_actuel > p.pv_max:
         p.pv_actuel = p.pv_max
     if p.mana > p.mana_max:
         p.mana = p.mana_max
-
-    # Si on modifie une stat qui affecte les dérivés, recalculer
-    if code_stat in ['int_stat', 'sag', 'gm_mana_max_bonus', 'gm_pv_max_bonus', 'mana_bonus_racial']:
-        p.recalculer_derives()
     p.sauvegarder()
 
     # 4. Confirmation
@@ -7587,15 +7604,15 @@ async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choic
 
     code_stat = stat.value
 
-    # Pour mana_max et pv_max : on passe par gm_bonus pour ne pas être écrasé par recalculer_derives.
-    # "Bonus Mana/PV Max (items)" pointent vers le même total affiché — sinon
-    # utiliser l'un après l'autre les fait s'écraser/s'accumuler de façon incohérente.
-    if code_stat in ("mana_max", "mana_max_bonus_item"):
+    # PV Max / Mana Max se décomposent en 2 couches indépendantes (voir /set_stat
+    # pour le détail) : "PV/Mana Max" = total → gm_pv/mana_max_bonus ;
+    # "Bonus PV/Mana Max (items)" = part objets → gm_pv/mana_max_bonus_item.
+    if code_stat == "mana_max":
         # Calcule le mana_max de base (sans gm_bonus) pour savoir le delta
         base_mana = (p.int_stat * 8) + 10 + getattr(p, "mana_bonus_racial", 0) + getattr(p, "mana_max_bonus_item", 0)
         p.gm_mana_max_bonus = valeur - base_mana
         p.mana_max = valeur
-    elif code_stat in ("pv_max", "pv_max_bonus_item"):
+    elif code_stat == "pv_max":
         if p.classe == "guerrier":
             base_pv = 38 + ((p.niveau - 1) * 6) + getattr(p, "pv_max_bonus_item", 0)
             if "passif_legion_rempart" in p.competences: base_pv += 4
@@ -7609,17 +7626,26 @@ async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choic
         p.gm_pv_max_bonus = valeur - base_pv
         p.pv_max = valeur
         p.pv_actuel = valeur
-    elif code_stat in ("bonus_pieces_item", "bonus_base_item"):
-        # Ce champ est recalculé depuis les objets équipés à chaque chargement
-        # (voir charger_equipement) : "valeur" est le total voulu, on stocke
-        # l'écart dans le bonus persistant correspondant (gm_*) pour qu'il
-        # survive au prochain chargement. p.<code_stat> reflète déjà le total
-        # effectif actuel (item + bonus manuel précédent).
-        gm_field = "gm_bonus_pieces_item" if code_stat == "bonus_pieces_item" else "gm_bonus_base_item"
+    elif code_stat in ("mana_max_bonus_item", "pv_max_bonus_item", "bonus_pieces_item", "bonus_base_item"):
+        # Ces 4 champs sont recalculés depuis les objets équipés à chaque
+        # chargement (voir charger_equipement) : "valeur" est le total voulu
+        # pour cette part, on stocke l'écart dans le bonus persistant
+        # correspondant (gm_*) pour qu'il survive au prochain chargement.
+        # p.<code_stat> reflète déjà le total effectif actuel (item auto-détecté
+        # + bonus manuel précédent).
+        gm_field = {
+            "mana_max_bonus_item": "gm_mana_max_bonus_item",
+            "pv_max_bonus_item": "gm_pv_max_bonus_item",
+            "bonus_pieces_item": "gm_bonus_pieces_item",
+            "bonus_base_item": "gm_bonus_base_item",
+        }[code_stat]
         valeur_actuelle = getattr(p, code_stat, 0)
         delta = valeur - valeur_actuelle
         setattr(p, gm_field, getattr(p, gm_field, 0) + delta)
         setattr(p, code_stat, valeur)
+        if code_stat in ("mana_max_bonus_item", "pv_max_bonus_item"):
+            p.recalculer_derives()
+            p.pv_actuel = min(p.pv_actuel, p.pv_max)
     else:
         # Modification directe pour les autres stats (phy, esp, etc.)
         # "valeur" est le TOTAL affiché voulu (base + bonus d'items éventuels).
