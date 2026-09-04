@@ -1176,27 +1176,73 @@ class Personnage:
     def recalculer_derives(self):
         self.mana_max = 0
         self.versets_max = 0
+        # Détail du calcul (pour /fiche) — reconstruit à chaque appel, jamais persisté.
+        detail_pv = []
+        detail_mana = []
+        detail_versets = []
+
+        item_pv = getattr(self, 'pv_max_bonus_item', 0)
         # ── Rééquilibrage combat (-30% PV pour raccourcir les combats) ──
         # Anciennes formules : guerrier 55+(niv-1)*8 / mage 35+(niv-1)*4 / pretre 45+(niv-1)*6
         if self.classe == "guerrier":
             # bonus_humain est géré cumulativement via gm_pv_max_bonus dans appliquer_pallier_race
-            self.pv_max = 38 + ((self.niveau - 1) * 6) + getattr(self, 'pv_max_bonus_item', 0)
+            base_pv = 38 + ((self.niveau - 1) * 6)
+            self.pv_max = base_pv + item_pv
+            detail_pv.append(("Base (Niveau)", base_pv))
         elif self.classe == "mage":
-            self.pv_max = 25 + ((self.niveau - 1) * 3) + getattr(self, 'pv_max_bonus_item', 0)
-            self.mana_max = (self.int_stat * 8) + 10 + getattr(self, 'mana_bonus_racial', 0) + getattr(self, 'mana_max_bonus_item', 0) 
+            base_pv = 25 + ((self.niveau - 1) * 3)
+            self.pv_max = base_pv + item_pv
+            detail_pv.append(("Base (Niveau)", base_pv))
+            base_mana = (self.int_stat * 8) + 10
+            racial_mana = getattr(self, 'mana_bonus_racial', 0)
+            item_mana = getattr(self, 'mana_max_bonus_item', 0)
+            self.mana_max = base_mana + racial_mana + item_mana
+            detail_mana.append(("Base (Intelligence)", base_mana))
+            if racial_mana: detail_mana.append(("Racial", racial_mana))
+            if item_mana: detail_mana.append(("Objets", item_mana))
         elif self.classe == "pretre":
-            self.pv_max = 32 + ((self.niveau - 1) * 4) + getattr(self, 'pv_max_bonus_item', 0)
-            self.versets_max = self.sag + getattr(self, 'versets_max_bonus_racial', 0)
+            base_pv = 32 + ((self.niveau - 1) * 4)
+            self.pv_max = base_pv + item_pv
+            detail_pv.append(("Base (Niveau)", base_pv))
+            racial_versets = getattr(self, 'versets_max_bonus_racial', 0)
+            self.versets_max = self.sag + racial_versets
+            detail_versets.append(("Sagesse", self.sag))
+            if racial_versets: detail_versets.append(("Racial", racial_versets))
+        if item_pv: detail_pv.append(("Objets", item_pv))
         if self.race == "Féral":
             self.pv_max -= 5
+            detail_pv.append(("Racial (Féral)", -5))
         # Passifs V4 permanents
         if "passif_legion_rempart" in self.competences:
             self.pv_max += 4
+            detail_pv.append(("Passif (Rempart)", 4))
         if "passif_lotus_discipline" in self.competences:
             self.pv_max += 5
+            detail_pv.append(("Passif (Discipline)", 5))
         # Bonus GM persistants (non effacés par les items ni le repos)
-        self.pv_max += getattr(self, "gm_pv_max_bonus", 0)
-        self.mana_max += getattr(self, "gm_mana_max_bonus", 0)
+        gm_pv = getattr(self, "gm_pv_max_bonus", 0)
+        gm_mana = getattr(self, "gm_mana_max_bonus", 0)
+        self.pv_max += gm_pv
+        self.mana_max += gm_mana
+        if gm_pv: detail_pv.append(("Manuel", gm_pv))
+        if gm_mana: detail_mana.append(("Manuel", gm_mana))
+
+        self._detail_pv_max = detail_pv
+        self._detail_mana_max = detail_mana
+        self._detail_versets_max = detail_versets
+
+    def detail_stat_max(self, nom_stat):
+        """Formatte le détail du calcul d'une stat dérivée (pv_max/mana_max/versets_max)
+        pour affichage dans /fiche, ex: '38 + 15 (Objets) + 5 (Manuel)'."""
+        detail = getattr(self, f"_detail_{nom_stat}", None)
+        if not detail:
+            return None
+        base_label, base_val = detail[0]
+        parts = [str(base_val)]
+        for label, val in detail[1:]:
+            signe = "+" if val >= 0 else "-"
+            parts.append(f"{signe} {abs(val)} ({label})")
+        return " ".join(parts)
 
     def get_bonus_niveau(self):
         return self.niveau // 5
@@ -2339,6 +2385,12 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
         if defenseur.pv_actuel <= seuil_d:
             degats_finaux += 9999
             msg.append(f"🎯⚔️ **EXÉCUTION DE L'OMBRE** : Cible Désignée sous {data['execute_percent_si_designation']}% PV !")
+            # Consomme la Désignation (même bug que double_dmg_si_designation :
+            # ce flag n'enlevait jamais le marquage de la cible)
+            attaquant.designation_stacks -= 1
+            if attaquant.designation_stacks <= 0:
+                attaquant.designation_target_id = 0
+                msg.append("🎯 **Désignation consommée** : la cible n'est plus marquée.")
 
     # -- MOINE : ferveur si Concentré --
     if data.get("ferveur_si_concentre") and attaquant.concentre:
@@ -5797,6 +5849,24 @@ async def fiche(interaction: discord.Interaction):
 
     embed.add_field(name="❤️ État Vital", value=txt_vital + txt_ressource, inline=True)
 
+    # --- D.bis DÉTAIL DU CALCUL (PV Max / Mana Max / Versets Max) ---
+    # N'affiche que les stats ayant au moins un bonus (item/racial/manuel) en plus
+    # de la base, pour ne pas encombrer la fiche des persos sans bonus.
+    detail_lignes = []
+    detail_pv_txt = p.detail_stat_max("pv_max")
+    if detail_pv_txt and len(getattr(p, "_detail_pv_max", [])) > 1:
+        detail_lignes.append(f"❤️ **PV Max** = {detail_pv_txt} = **{p.pv_max}**")
+    if p.classe == "mage":
+        detail_mana_txt = p.detail_stat_max("mana_max")
+        if detail_mana_txt and len(getattr(p, "_detail_mana_max", [])) > 1:
+            detail_lignes.append(f"🔵 **Mana Max** = {detail_mana_txt} = **{p.mana_max}**")
+    if p.classe == "pretre":
+        detail_versets_txt = p.detail_stat_max("versets_max")
+        if detail_versets_txt and len(getattr(p, "_detail_versets_max", [])) > 1:
+            detail_lignes.append(f"📖 **Versets Max** = {detail_versets_txt} = **{p.versets_max}**")
+    if detail_lignes:
+        embed.add_field(name="🧮 Détail du calcul", value="\n".join(detail_lignes), inline=False)
+
     # --- E. BLOC STATISTIQUES (FILTRÉ & PROPRE) ---
     stats_box = ""
     if p.classe == "guerrier":
@@ -7222,10 +7292,14 @@ async def gm_spawn(interaction: discord.Interaction, nom: str, niveau: int, clas
                 learned_log.append(data['nom'])
 
     # --- 5. FINALISATION ---
-    p.recalculer_derives()
     if race_defaut == "Monstre":
-        p.pv_max += (niveau * 4)  # Anciennement niveau*5, réduit ~30% pour raccourcir les combats
-        p.mana_max += (niveau * 2)
+        # Stocké dans gm_pv/mana_max_bonus (persistant) et non pv_max/mana_max
+        # directement : recalculer_derives() est maintenant appelé à chaque
+        # chargement du personnage (voir Personnage.charger) et écraserait
+        # sinon ce bonus à la prochaine fiche/action du monstre.
+        p.gm_pv_max_bonus = getattr(p, 'gm_pv_max_bonus', 0) + (niveau * 4)  # Anciennement niveau*5, réduit ~30% pour raccourcir les combats
+        p.gm_mana_max_bonus = getattr(p, 'gm_mana_max_bonus', 0) + (niveau * 2)
+    p.recalculer_derives()
 
     p.pv_actuel = p.pv_max
     if p.classe == "mage": p.mana = p.mana_max
