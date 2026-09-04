@@ -3017,40 +3017,22 @@ async def appliquer(interaction: discord.Interaction, effet: app_commands.Choice
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="tour", description="🔄 Début de tour : HUD + Gestion des Effets + Initiative")
-@app_commands.describe(
-    perso1="Personnage supplémentaire 1",
-    perso2="Personnage supplémentaire 2",
-    perso3="Personnage supplémentaire 3",
-    perso4="Personnage supplémentaire 4",
-    perso5="Personnage supplémentaire 5",
-    perso6="Personnage supplémentaire 6",
-    perso7="Personnage supplémentaire 7",
-    perso8="Personnage supplémentaire 8",
-    perso9="Personnage supplémentaire 9",
-)
-@app_commands.autocomplete(
-    perso1=tour_noms_autocomplete, perso2=tour_noms_autocomplete, perso3=tour_noms_autocomplete,
-    perso4=tour_noms_autocomplete, perso5=tour_noms_autocomplete, perso6=tour_noms_autocomplete,
-    perso7=tour_noms_autocomplete, perso8=tour_noms_autocomplete, perso9=tour_noms_autocomplete,
-)
-async def tour(interaction: discord.Interaction,
-               perso1: str = None, perso2: str = None, perso3: str = None,
-               perso4: str = None, perso5: str = None, perso6: str = None,
-               perso7: str = None, perso8: str = None, perso9: str = None):
-    
+# Logique extraite dans _executer_tour() pour être réutilisable à la fois par la
+# commande /tour ET par le bouton "🔄 Tour Suivant" posé sur le HUD (voir
+# TourSuivantView plus bas), qui relance un tour avec exactement la même liste
+# de personnages sans avoir à la ressaisir dans l'auto-complétion.
+async def _executer_tour(interaction: discord.Interaction, perso_noms_args: list):
     # 1. On defer car le chargement et la sauvegarde de 10 fiches peut prendre quelques secondes
     await interaction.response.defer()
 
     # --- 2. CHARGEMENT DE TOUS LES PERSONNAGES ---
     persos_a_traiter = []
-    
+
     p_main = Personnage.charger(interaction.user.id)
-    if not p_main: 
+    if not p_main:
         return await interaction.followup.send("❌ Pas de fiche.", ephemeral=True)
     persos_a_traiter.append(p_main)
 
-    perso_noms_args = [a for a in [perso1, perso2, perso3, perso4, perso5, perso6, perso7, perso8, perso9] if a]
     for arg in perso_noms_args:
         p_extra = None
         if ":" in arg:
@@ -3396,9 +3378,56 @@ async def tour(interaction: discord.Interaction,
     all_embeds = [header] + embeds_joueurs
 
     await log_combat(interaction, header)
-    
+
     # On utilise followup.send car on a utilisé defer() au début
-    await interaction.followup.send(embeds=all_embeds)
+    await interaction.followup.send(
+        embeds=all_embeds,
+        view=TourSuivantView(interaction.user.id, perso_noms_args),
+    )
+
+
+@bot.tree.command(name="tour", description="🔄 Début de tour : HUD + Gestion des Effets + Initiative")
+@app_commands.describe(
+    perso1="Personnage supplémentaire 1",
+    perso2="Personnage supplémentaire 2",
+    perso3="Personnage supplémentaire 3",
+    perso4="Personnage supplémentaire 4",
+    perso5="Personnage supplémentaire 5",
+    perso6="Personnage supplémentaire 6",
+    perso7="Personnage supplémentaire 7",
+    perso8="Personnage supplémentaire 8",
+    perso9="Personnage supplémentaire 9",
+)
+@app_commands.autocomplete(
+    perso1=tour_noms_autocomplete, perso2=tour_noms_autocomplete, perso3=tour_noms_autocomplete,
+    perso4=tour_noms_autocomplete, perso5=tour_noms_autocomplete, perso6=tour_noms_autocomplete,
+    perso7=tour_noms_autocomplete, perso8=tour_noms_autocomplete, perso9=tour_noms_autocomplete,
+)
+async def tour(interaction: discord.Interaction,
+               perso1: str = None, perso2: str = None, perso3: str = None,
+               perso4: str = None, perso5: str = None, perso6: str = None,
+               perso7: str = None, perso8: str = None, perso9: str = None):
+    perso_noms_args = [a for a in [perso1, perso2, perso3, perso4, perso5, perso6, perso7, perso8, perso9] if a]
+    await _executer_tour(interaction, perso_noms_args)
+
+
+class TourSuivantView(discord.ui.View):
+    """Bouton posé sur le HUD de /tour : relance un tour avec exactement la même
+    liste de personnages (perso_noms_args capturée au moment de l'envoi), pour
+    éviter de resaisir jusqu'à 9 champs d'auto-complétion à chaque round.
+    Seul le joueur qui a lancé /tour (généralement le MJ) peut cliquer."""
+    def __init__(self, auteur_id: int, perso_noms_args: list):
+        super().__init__(timeout=1800)  # 30 min : une session de combat peut durer
+        self.auteur_id = auteur_id
+        self.perso_noms_args = perso_noms_args
+
+    @discord.ui.button(label="🔄 Tour Suivant", style=discord.ButtonStyle.success)
+    async def tour_suivant(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.auteur_id:
+            return await interaction.response.send_message("❌ Seul l'auteur du `/tour` peut passer au tour suivant.", ephemeral=True)
+        button.disabled = True
+        await interaction.message.edit(view=self)
+        await _executer_tour(interaction, self.perso_noms_args)
 
 
 # 1. SOIN
@@ -4134,16 +4163,28 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
             if sort in SKILLS_DB:
                 data_gagnant = json.loads(SKILLS_DB[sort].get('data_json', '{}'))
 
+        # Récupérer les flags ignore posés par traiter_effets_json/singularité (BUG : jusqu'ici
+        # jamais lus en clash, contrairement à /attaque — le défenseur n'avait aucun moyen de
+        # savoir qu'il fallait cocher perce_armure sur son /defense).
+        ignore_armor_flag_clash = getattr(vainqueur, "_ignore_armor", False)
+        ignore_rob_flag_clash = getattr(vainqueur, "_ignore_rob", False)
+        vainqueur._ignore_armor = False; vainqueur._ignore_rob = False
+
         embed_fin = discord.Embed(title="FIN DU CLASH", color=0xF1C40F)
         embed_fin.description = f"🏆 **{vainqueur.nom}** l'emporte !"
         visuel_str = ' '.join(vis_fin) if vis_fin else "💨"
-        
+
         embed_fin.add_field(
-            name=f"Dégâts sur {perdant.nom}", 
-            value=f"*{desc_sort}*\n🎲 **Jet ({pieces_restantes} pièces) :** {visuel_str}\n💥 **TOTAL : {damage_final} DÉGÂTS** {bonus_txt}{msg_soin_vamp}", 
+            name=f"Dégâts sur {perdant.nom}",
+            value=f"*{desc_sort}*\n🎲 **Jet ({pieces_restantes} pièces) :** {visuel_str}\n💥 **TOTAL : {damage_final} DÉGÂTS** {bonus_txt}{msg_soin_vamp}",
             inline=False
         )
-        
+
+        if ignore_armor_flag_clash:
+            embed_fin.add_field(name="🗡️ Attaque Perforante", value=f"👉 **{perdant.nom}** : `/defense` avec **perce_armure: Vrai** ! (Armure + Rob ignorées)", inline=False)
+        elif ignore_rob_flag_clash:
+            embed_fin.add_field(name="🗡️ Rob Percée", value=f"👉 **{perdant.nom}** : `/defense` avec **perce_armure: Vrai** ! (Robustesse ignorée)", inline=False)
+
         if cibles_sec_gagnant and (data_gagnant.get("aoe") or data_gagnant.get("ricochet")):
             persos_sec = parse_cibles_sec(cibles_sec_gagnant)
             noms_sec = ", ".join(f"**{ps.nom}** (<@{ps.user_id}>)" for ps in persos_sec) if persos_sec else cibles_sec_gagnant
@@ -4158,15 +4199,19 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
 
         embed_fin.add_field(name="Action", value=f"👉 **<@{perdant.user_id}>**, utilisez `/defense` ou cliquez sur **🛡️ Défendre** !", inline=False)
         await log_combat(interaction, embed_fin)
+        cibles_defense = [(perdant.user_id, perdant.nom, damage_final)]
+        if cibles_sec_gagnant and (data_gagnant.get("aoe") or data_gagnant.get("ricochet")):
+            cibles_defense += [(ps.user_id, ps.nom, damage_final) for ps in parse_cibles_sec(cibles_sec_gagnant)]
         await interaction.followup.send(
             embed=embed_fin,
-            view=DefenseButtonView(perdant.user_id, perdant.nom, damage_final),
+            view=build_defense_view(cibles_defense, ignore_armor_flag_clash or ignore_rob_flag_clash),
         )
 
     # --- AoE ATTAQUANT même si perdant (effets de zone toujours appliqués) ---
     # Si l'attaquant avait une AoE et a perdu le clash, les cibles secondaires
     # reçoivent quand même les dégâts de base du sort (sans les pièces restantes)
     elif vainqueur is None or vainqueur == p_defenseur:
+        cibles_defense_atq = []
         cibles_sec_atq = clash_data.get('cibles_sec_a')
         if cibles_sec_atq:
             ref_a = clash_data.get('ref_a')
@@ -4187,11 +4232,15 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
                     lignes_aoe_atq = appliquer_statuts_aoe(persos_sec_atq, data_a, heads=heads_a)
                     if lignes_aoe_atq:
                         embed_fin.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_aoe_atq), inline=False)
+                    cibles_defense_atq = [(ps.user_id, ps.nom, dmg_zone) for ps in persos_sec_atq]
 
         embed_fin.add_field(name="Action", value=f"👉 **<@{perdant.user_id}>**, utilisez `/defense` !", inline=False)
-        
+
         await log_combat(interaction, embed_fin)
-        await interaction.followup.send(embed=embed_fin)
+        if cibles_defense_atq:
+            await interaction.followup.send(embed=embed_fin, view=build_defense_view(cibles_defense_atq))
+        else:
+            await interaction.followup.send(embed=embed_fin)
     else:
         await interaction.followup.send("⚖️ **Égalité parfaite !** Aucun dégât.")
 
@@ -4291,7 +4340,9 @@ class ClashInitieView(discord.ui.View):
                 f"❌ **{p_def.nom}** ne connaît aucune technique offensive utilisable en riposte.", ephemeral=True
             )
 
-        await interaction.response.send_message(
+        button.disabled = True
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send(
             f"⚔️ Choisissez la technique de riposte de **{p_def.nom}** :",
             view=RiposteSpellView(self.cible_user_id, self.p_cible_nom, options_sorts),
             ephemeral=True,
@@ -4731,6 +4782,8 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         embed.add_field(name="🗡️ Rob Percée", value=f"👉 **{p_cible.nom}** : `/defense` avec **perce_armure: Vrai** ! (Robustesse ignorée)", inline=False)
 
     data_parse = json.loads(json_data)
+    perce_armure_atk = ignore_armor_flag or ignore_rob_flag
+    cibles_defense = [(p_cible.user_id, p_cible.nom, total)]
 
     if cibles_secondaires and (data_parse.get("aoe") or data_parse.get("ricochet")):
         persos_sec = parse_cibles_sec(cibles_secondaires)
@@ -4739,6 +4792,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         lignes_effets = appliquer_statuts_aoe(persos_sec, data_parse, heads=heads)
         if lignes_effets:
             embed.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_effets), inline=False)
+        cibles_defense += [(ps.user_id, ps.nom, total) for ps in persos_sec]
 
     if cibles_secondaires and data_parse.get("aoe_reduit"):
         total_reduit = max(1, total // 2)
@@ -4748,11 +4802,12 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         lignes_effets = appliquer_statuts_aoe(persos_sec, data_parse, heads=heads)
         if lignes_effets:
             embed.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_effets), inline=False)
+        cibles_defense += [(ps.user_id, ps.nom, total_reduit) for ps in persos_sec]
 
     await log_combat(interaction, embed)
     await interaction.followup.send(
         embed=embed,
-        view=DefenseButtonView(p_cible.user_id, p_cible.nom, total, ignore_armor_flag or ignore_rob_flag),
+        view=build_defense_view(cibles_defense, perce_armure_atk),
     )
 
 # 5. DEFENSE (Modifiée - Réduction Passive)
@@ -5170,26 +5225,32 @@ class DefenseTypeView(discord.ui.View):
         self.add_item(DefenseTypeSelect(cible_user_id, p_nom, degats_annonces, perce_armure))
 
 
-class DefenseButtonView(discord.ui.View):
-    """Bouton posé sur les embeds de /attaque et /clash (perdant) : ouvre le choix
-    Encaisser/Esquiver, avec les dégâts déjà annoncés pré-remplis dans l'étape
-    suivante — le joueur n'a qu'à ajuster si besoin (ex: réduction non trackée)."""
-    def __init__(self, cible_user_id: int, p_nom: str, degats_annonces: int, perce_armure: bool = False):
-        super().__init__(timeout=600)
-        self.cible_user_id = cible_user_id
-        self.p_nom = p_nom
-        self.degats_annonces = degats_annonces
-        self.perce_armure = perce_armure
+def build_defense_view(cibles: list, perce_armure: bool = False) -> discord.ui.View:
+    """Construit une vue avec un bouton "🛡️ Défendre" par cible touchée — la cible
+    principale d'une attaque/clash, et/ou chacune des cibles secondaires d'une
+    zone d'effet, combinées dans une seule vue (une seule vue par message Discord).
+    cibles : liste de (user_id, nom, degats_annonces). Chaque bouton se désactive
+    lui-même une fois cliqué (par le bon joueur), pour indiquer visuellement
+    qu'il a déjà été utilisé — évite un double-clic qui rouvrirait le menu."""
+    view = discord.ui.View(timeout=600)
+    solo = len(cibles) == 1
+    for cible_user_id, p_nom, degats_annonces in cibles[:25]:
+        label = "🛡️ Défendre" if solo else f"🛡️ Défendre ({p_nom})"
+        btn = discord.ui.Button(label=label[:80], style=discord.ButtonStyle.primary)
 
-    @discord.ui.button(label="🛡️ Défendre", style=discord.ButtonStyle.primary)
-    async def defendre(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.cible_user_id:
-            return await interaction.response.send_message("❌ Ce n'est pas votre combat.", ephemeral=True)
-        await interaction.response.send_message(
-            f"🛡️ **{self.p_nom}** — comment réagissez-vous face à **{self.degats_annonces}** dégâts ?",
-            view=DefenseTypeView(self.cible_user_id, self.p_nom, self.degats_annonces, self.perce_armure),
-            ephemeral=True,
-        )
+        async def _callback(interaction: discord.Interaction, _btn=btn, _uid=cible_user_id, _nom=p_nom, _dmg=degats_annonces):
+            if interaction.user.id != _uid:
+                return await interaction.response.send_message("❌ Ce n'est pas votre combat.", ephemeral=True)
+            _btn.disabled = True
+            await interaction.response.edit_message(view=view)
+            await interaction.followup.send(
+                f"🛡️ **{_nom}** — comment réagissez-vous face à **{_dmg}** dégâts ?",
+                view=DefenseTypeView(_uid, _nom, _dmg, perce_armure),
+                ephemeral=True,
+            )
+        btn.callback = _callback
+        view.add_item(btn)
+    return view
 
 
 @bot.tree.command(name="recitation", description="🙏 (Prêtre) Générer de la Ferveur par la prière")
