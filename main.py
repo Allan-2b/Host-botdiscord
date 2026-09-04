@@ -4929,9 +4929,9 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
 
         nom_ressource = ""; stock_actuel = 0; multiplicateur = 0
         if p.classe == "guerrier": nom_ressource = "tension"; stock_actuel = p.tension; multiplicateur = 4
-        elif p.classe == "mage": nom_ressource = "mana"; stock_actuel = p.mana; multiplicateur = 2
+        elif p.classe == "mage": nom_ressource = "mana"; stock_actuel = p.mana; multiplicateur = 1
         elif p.classe == "pretre": nom_ressource = "ferveur"; stock_actuel = p.ferveur; multiplicateur = 0.5
-        elif p.classe == "monstre": nom_ressource = "mana"; stock_actuel = p.mana; multiplicateur = 2
+        elif p.classe == "monstre": nom_ressource = "mana"; stock_actuel = p.mana; multiplicateur = 1
 
         if ressource_spend > 0:
             if stock_actuel >= ressource_spend:
