@@ -3702,28 +3702,23 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
         'p_attaquant': p_attaquant,
         'cibles_sec_a': cibles_secondaires,
         'ref_a': sort,
-        'sort_data_a': skill_data
+        'sort_data_a': skill_data,
+        'p_cible_nom': p_cible_clash.nom,
     }
 
     embed = discord.Embed(title="⚔️ CLASH INITIÉ !", description=f"**{p_attaquant.nom}** provoque **{p_cible_clash.nom}** !", color=0xE67E22)
     embed.add_field(name="Technique", value=f"⚡ **{skill_obj.nom}**\n*{skill_data['desc']}*{cout_msg}{msg_hemo}{msg_bonus_manuel_clash}", inline=False)
     embed.add_field(name="Action", value=f"*« {description} »*", inline=False)
-    embed.add_field(name="En attente...", value=f"👉 **{p_cible_clash.nom}** (<@{cible_user_id}>), répondez avec `/riposte` !", inline=False)
+    embed.add_field(name="En attente...", value=f"👉 **{p_cible_clash.nom}** (<@{cible_user_id}>), répondez avec `/riposte` ou cliquez sur **🗡️ Riposter** ci-dessous !", inline=False)
 
     await log_combat(interaction, embed)
-    await interaction.followup.send(content=f"<@{cible_user_id}>", embed=embed)
+    await interaction.followup.send(content=f"<@{cible_user_id}>", embed=embed, view=ClashInitieView(cible_user_id, p_cible_clash.nom))
 
 # 3. RIPOSTE (Modifié avec Races & Calculs Dégâts)
-@bot.tree.command(name="riposte", description="Répondre à la commande /clash d'un adversaire")
-@app_commands.describe(
-    sort="Votre technique", description="Action RP", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)",
-    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)",
-    bonus_base="[Optionnel] Bonus fixe sur la Base (buff, circonstance MJ…)",
-    bonus_pieces="[Optionnel] Pièces bonus supplémentaires"
-)
-@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete,
-    cible_sec1=cible_fiche_autocomplete, cible_sec2=cible_fiche_autocomplete, cible_sec3=cible_fiche_autocomplete)
-async def riposte(interaction: discord.Interaction, sort: str, description: str, personnage: str = None,
+# Logique extraite dans _executer_riposte() pour être réutilisable à la fois par
+# la commande /riposte ET par le bouton "🗡️ Riposter" posé sur l'embed de /clash
+# (voir ClashInitieView plus bas).
+async def _executer_riposte(interaction: discord.Interaction, sort: str, description: str, personnage: str = None,
                   cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None,
                   bonus_base: int = 0, bonus_pieces: int = 0):
     cibles_secondaires = " ".join(s for s in [cible_sec1, cible_sec2, cible_sec3] if s) or None
@@ -4197,8 +4192,110 @@ async def riposte(interaction: discord.Interaction, sort: str, description: str,
     else:
         await interaction.followup.send("⚖️ **Égalité parfaite !** Aucun dégât.")
 
-        
-# 4. ATTAQUE 
+
+@bot.tree.command(name="riposte", description="Répondre à la commande /clash d'un adversaire")
+@app_commands.describe(
+    sort="Votre technique", description="Action RP", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)",
+    cible_sec1="Cible de zone 1 (optionnel)", cible_sec2="Cible de zone 2 (optionnel)", cible_sec3="Cible de zone 3 (optionnel)",
+    bonus_base="[Optionnel] Bonus fixe sur la Base (buff, circonstance MJ…)",
+    bonus_pieces="[Optionnel] Pièces bonus supplémentaires"
+)
+@app_commands.autocomplete(sort=sort_offensif_autocomplete, personnage=joueur_perso_autocomplete,
+    cible_sec1=cible_fiche_autocomplete, cible_sec2=cible_fiche_autocomplete, cible_sec3=cible_fiche_autocomplete)
+async def riposte(interaction: discord.Interaction, sort: str, description: str, personnage: str = None,
+                  cible_sec1: str = None, cible_sec2: str = None, cible_sec3: str = None,
+                  bonus_base: int = 0, bonus_pieces: int = 0):
+    await _executer_riposte(interaction, sort, description, personnage, cible_sec1, cible_sec2, cible_sec3, bonus_base, bonus_pieces)
+
+
+class RiposteDescriptionModal(discord.ui.Modal):
+    """Dernière étape du bouton Riposter : demande la description RP puis résout
+    la riposte via _executer_riposte (même logique que la commande /riposte)."""
+    def __init__(self, p_cible_nom: str, sort_ref: str, nom_sort: str):
+        super().__init__(title=f"Riposte — {nom_sort}"[:45])
+        self.p_cible_nom = p_cible_nom
+        self.sort_ref = sort_ref
+        self.description_input = discord.ui.TextInput(
+            label="Description RP",
+            placeholder="Décrivez votre riposte...",
+            default=f"Riposte avec {nom_sort}",
+            required=True,
+            max_length=300,
+        )
+        self.add_item(self.description_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await _executer_riposte(interaction, self.sort_ref, str(self.description_input.value), self.p_cible_nom)
+
+
+class RiposteSpellSelect(discord.ui.Select):
+    def __init__(self, cible_user_id: int, p_cible_nom: str, options_sorts: list):
+        options = [
+            discord.SelectOption(label=nom_sort[:100], value=ref_sort)
+            for ref_sort, nom_sort in options_sorts
+        ]
+        super().__init__(placeholder="Choisissez votre technique de riposte...", options=options, min_values=1, max_values=1)
+        self.cible_user_id = cible_user_id
+        self.p_cible_nom = p_cible_nom
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.cible_user_id:
+            return await interaction.response.send_message("❌ Ce n'est pas votre combat.", ephemeral=True)
+        if self.cible_user_id not in PENDING_CLASHES:
+            return await interaction.response.send_message("❌ Ce Clash n'est plus actif (déjà résolu ou annulé).", ephemeral=True)
+        sort_ref = self.values[0]
+        nom_sort = SKILLS_DB.get(sort_ref, {}).get('nom', sort_ref)
+        await interaction.response.send_modal(RiposteDescriptionModal(self.p_cible_nom, sort_ref, nom_sort))
+
+
+class RiposteSpellView(discord.ui.View):
+    def __init__(self, cible_user_id: int, p_cible_nom: str, options_sorts: list):
+        super().__init__(timeout=120)
+        self.add_item(RiposteSpellSelect(cible_user_id, p_cible_nom, options_sorts))
+
+
+class ClashInitieView(discord.ui.View):
+    """Bouton posé sur l'embed de /clash : ouvre le choix du sort de riposte,
+    filtré sur les compétences RÉELLES de la fiche visée par le clash (jamais
+    la liste complète des sorts du jeu — y compris quand c'est un MJ qui
+    répond, pour éviter qu'il se retrouve avec tous les sorts du jeu à choisir)."""
+    def __init__(self, cible_user_id: int, p_cible_nom: str):
+        super().__init__(timeout=600)
+        self.cible_user_id = cible_user_id
+        self.p_cible_nom = p_cible_nom
+
+    @discord.ui.button(label="🗡️ Riposter", style=discord.ButtonStyle.danger)
+    async def riposter(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.cible_user_id:
+            return await interaction.response.send_message("❌ Ce n'est pas votre combat.", ephemeral=True)
+        if self.cible_user_id not in PENDING_CLASHES:
+            return await interaction.response.send_message("❌ Ce Clash n'est plus actif (déjà résolu ou annulé).", ephemeral=True)
+
+        p_def = Personnage.charger_par_nom(self.cible_user_id, self.p_cible_nom)
+        if not p_def:
+            return await interaction.response.send_message("❌ Fiche introuvable.", ephemeral=True)
+
+        options_sorts = []
+        for ref, val in SKILLS_DB.items():
+            if val.get('type') != 'actif': continue
+            if "(BONUS)" in val['nom'].upper(): continue
+            if ref not in p_def.competences: continue
+            options_sorts.append((ref, val['nom']))
+        options_sorts = options_sorts[:25]
+
+        if not options_sorts:
+            return await interaction.response.send_message(
+                f"❌ **{p_def.nom}** ne connaît aucune technique offensive utilisable en riposte.", ephemeral=True
+            )
+
+        await interaction.response.send_message(
+            f"⚔️ Choisissez la technique de riposte de **{p_def.nom}** :",
+            view=RiposteSpellView(self.cible_user_id, self.p_cible_nom, options_sorts),
+            ephemeral=True,
+        )
+
+
+# 4. ATTAQUE
 @bot.tree.command(name="attaque", description="Attaque")
 @app_commands.describe(
     sort="Votre technique", cible="L'adversaire (tapez pour chercher)",
