@@ -4156,9 +4156,12 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
             if lignes_aoe:
                 embed_fin.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_aoe), inline=False)
 
-        embed_fin.add_field(name="Action", value=f"👉 **<@{perdant.user_id}>**, utilisez `/defense` !", inline=False)
+        embed_fin.add_field(name="Action", value=f"👉 **<@{perdant.user_id}>**, utilisez `/defense` ou cliquez sur **🛡️ Défendre** !", inline=False)
         await log_combat(interaction, embed_fin)
-        await interaction.followup.send(embed=embed_fin)
+        await interaction.followup.send(
+            embed=embed_fin,
+            view=DefenseButtonView(perdant.user_id, perdant.nom, damage_final),
+        )
 
     # --- AoE ATTAQUANT même si perdant (effets de zone toujours appliqués) ---
     # Si l'attaquant avait une AoE et a perdu le clash, les cibles secondaires
@@ -4747,17 +4750,18 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
             embed.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_effets), inline=False)
 
     await log_combat(interaction, embed)
-    await interaction.followup.send(embed=embed)
+    await interaction.followup.send(
+        embed=embed,
+        view=DefenseButtonView(p_cible.user_id, p_cible.nom, total, ignore_armor_flag or ignore_rob_flag),
+    )
 
 # 5. DEFENSE (Modifiée - Réduction Passive)
-@bot.tree.command(name="defense", description="Se défendre : Mitigation ou Esquive")
-@app_commands.describe(type_def="Encaisser ou Esquiver", degats_subis="Dégâts à subir", ressource_spend="Mana/Tension/Ferveur à dépenser", perce_armure="Mettre sur Vrai si l'attaque adverse ignore l'armure", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)")
-@app_commands.autocomplete(personnage=joueur_perso_autocomplete)
-@app_commands.choices(type_def=[
-    app_commands.Choice(name="🛡️ Encaisser", value="tank"),
-    app_commands.Choice(name="🏃 Esquive (Risque x1.5 dégâts)", value="esquive")
-])
-async def defense(interaction: discord.Interaction, type_def: app_commands.Choice[str], degats_subis: int, ressource_spend: int = 0, perce_armure: bool = False, personnage: str = None):
+# Logique extraite dans _executer_defense() pour être réutilisable à la fois par
+# la commande /defense ET par le bouton "🛡️ Défendre" posé sur les embeds de
+# /attaque et /clash (voir DefenseTypeView plus bas).
+async def _executer_defense(interaction: discord.Interaction, type_def, degats_subis: int, ressource_spend: int = 0,
+                            perce_armure: bool = False, personnage: str = None,
+                            reduction_manuelle: int = 0, raison_reduction: str = None):
     p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("Pas de fiche.", ephemeral=True)
     if p.pv_actuel <= 0: return await interaction.response.send_message("💀 K.O.", ephemeral=True)
@@ -4913,6 +4917,13 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
                 
             embed.add_field(name="🛡️ Armure Magique", value=msg_armure.strip(), inline=False)
 
+    # --- E.bis RÉDUCTION MANUELLE (couvre les bonus/réductions non trackés par le bot) ---
+    if reduction_manuelle > 0 and degats_finaux > 0:
+        reduc_appliquee = min(degats_finaux, reduction_manuelle)
+        degats_finaux -= reduc_appliquee
+        txt_raison = f" ({raison_reduction})" if raison_reduction else ""
+        embed.add_field(name="✋ Réduction Manuelle", value=f"-{reduc_appliquee} dégâts déclarés par le joueur{txt_raison} — non trackés par le bot.", inline=False)
+
     # --- FINALISATION ---
     msg_ko = ""
     msg_gain = ""
@@ -5067,6 +5078,118 @@ async def defense(interaction: discord.Interaction, type_def: app_commands.Choic
         
     await log_combat(interaction, embed)
     await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="defense", description="Se défendre : Mitigation ou Esquive")
+@app_commands.describe(type_def="Encaisser ou Esquiver", degats_subis="Dégâts à subir", ressource_spend="Mana/Tension/Ferveur à dépenser", perce_armure="Mettre sur Vrai si l'attaque adverse ignore l'armure", personnage="[Optionnel] Votre personnage (si vous jouez plusieurs fiches)", reduction_manuelle="[Optionnel] Réduction supplémentaire non trackée par le bot (objet/passif RP)", raison_reduction="[Optionnel] Raison de la réduction manuelle")
+@app_commands.autocomplete(personnage=joueur_perso_autocomplete)
+@app_commands.choices(type_def=[
+    app_commands.Choice(name="🛡️ Encaisser", value="tank"),
+    app_commands.Choice(name="🏃 Esquive (Risque x1.5 dégâts)", value="esquive")
+])
+async def defense(interaction: discord.Interaction, type_def: app_commands.Choice[str], degats_subis: int, ressource_spend: int = 0, perce_armure: bool = False, personnage: str = None, reduction_manuelle: int = 0, raison_reduction: str = None):
+    await _executer_defense(interaction, type_def, degats_subis, ressource_spend, perce_armure, personnage, reduction_manuelle, raison_reduction)
+
+
+class _ValeurChoisie:
+    """Mini-remplaçant d'app_commands.Choice pour le flux bouton : _executer_defense
+    n'utilise que l'attribut .value, jamais .name."""
+    __slots__ = ("value",)
+    def __init__(self, value):
+        self.value = value
+
+
+class DefenseModal(discord.ui.Modal):
+    """Dernière étape du bouton Défendre : dégâts annoncés (pré-remplis, modifiables)
+    + réduction manuelle pour les bonus/passifs RP non trackés par le bot, puis
+    résout via _executer_defense (même logique que la commande /defense)."""
+    def __init__(self, type_def_value: str, p_nom: str, degats_annonces: int, perce_armure: bool):
+        label_type = "Encaisser" if type_def_value == "tank" else "Esquiver"
+        super().__init__(title=f"Défense — {label_type}"[:45])
+        self.type_def_value = type_def_value
+        self.p_nom = p_nom
+        self.perce_armure = perce_armure
+
+        self.degats_input = discord.ui.TextInput(
+            label="Dégâts annoncés", default=str(degats_annonces), required=True, max_length=6,
+        )
+        self.reduction_input = discord.ui.TextInput(
+            label="Réduction manuelle (objet/passif non tracké)", placeholder="0",
+            default="0", required=False, max_length=6,
+        )
+        self.raison_input = discord.ui.TextInput(
+            label="Raison de la réduction (optionnel)", placeholder="Ex: Cape des Fils de Mana",
+            required=False, max_length=100,
+        )
+        self.ressource_input = discord.ui.TextInput(
+            label="Ressource dépensée (mitigation Tank)", placeholder="0",
+            default="0", required=False, max_length=6,
+        )
+        self.add_item(self.degats_input)
+        self.add_item(self.reduction_input)
+        self.add_item(self.raison_input)
+        self.add_item(self.ressource_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            degats_subis = int(str(self.degats_input.value).strip())
+            reduction_manuelle = int(str(self.reduction_input.value).strip() or "0")
+            ressource_spend = int(str(self.ressource_input.value).strip() or "0")
+        except ValueError:
+            return await interaction.response.send_message("❌ Les champs de dégâts/réduction/ressource doivent être des nombres.", ephemeral=True)
+        raison = str(self.raison_input.value).strip() or None
+        await _executer_defense(
+            interaction, _ValeurChoisie(self.type_def_value), degats_subis, ressource_spend,
+            self.perce_armure, self.p_nom, reduction_manuelle, raison,
+        )
+
+
+class DefenseTypeSelect(discord.ui.Select):
+    def __init__(self, cible_user_id: int, p_nom: str, degats_annonces: int, perce_armure: bool):
+        options = [
+            discord.SelectOption(label="🛡️ Encaisser (Mitigation)", value="tank"),
+            discord.SelectOption(label="🏃 Esquiver (Risque x1.5 dégâts)", value="esquive"),
+        ]
+        super().__init__(placeholder="Comment réagissez-vous ?", options=options, min_values=1, max_values=1)
+        self.cible_user_id = cible_user_id
+        self.p_nom = p_nom
+        self.degats_annonces = degats_annonces
+        self.perce_armure = perce_armure
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.cible_user_id:
+            return await interaction.response.send_message("❌ Ce n'est pas votre combat.", ephemeral=True)
+        await interaction.response.send_modal(
+            DefenseModal(self.values[0], self.p_nom, self.degats_annonces, self.perce_armure)
+        )
+
+
+class DefenseTypeView(discord.ui.View):
+    def __init__(self, cible_user_id: int, p_nom: str, degats_annonces: int, perce_armure: bool):
+        super().__init__(timeout=120)
+        self.add_item(DefenseTypeSelect(cible_user_id, p_nom, degats_annonces, perce_armure))
+
+
+class DefenseButtonView(discord.ui.View):
+    """Bouton posé sur les embeds de /attaque et /clash (perdant) : ouvre le choix
+    Encaisser/Esquiver, avec les dégâts déjà annoncés pré-remplis dans l'étape
+    suivante — le joueur n'a qu'à ajuster si besoin (ex: réduction non trackée)."""
+    def __init__(self, cible_user_id: int, p_nom: str, degats_annonces: int, perce_armure: bool = False):
+        super().__init__(timeout=600)
+        self.cible_user_id = cible_user_id
+        self.p_nom = p_nom
+        self.degats_annonces = degats_annonces
+        self.perce_armure = perce_armure
+
+    @discord.ui.button(label="🛡️ Défendre", style=discord.ButtonStyle.primary)
+    async def defendre(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.cible_user_id:
+            return await interaction.response.send_message("❌ Ce n'est pas votre combat.", ephemeral=True)
+        await interaction.response.send_message(
+            f"🛡️ **{self.p_nom}** — comment réagissez-vous face à **{self.degats_annonces}** dégâts ?",
+            view=DefenseTypeView(self.cible_user_id, self.p_nom, self.degats_annonces, self.perce_armure),
+            ephemeral=True,
+        )
 
 
 @bot.tree.command(name="recitation", description="🙏 (Prêtre) Générer de la Ferveur par la prière")
