@@ -5759,41 +5759,70 @@ async def pigeon(interaction: discord.Interaction, joueur: discord.Member, messa
 
 
 
+# Liste complète des stats modifiables via /set_stat. Un @app_commands.choices()
+# est limité à 25 entrées par Discord — on est déjà à 28 avec les compétences RP
+# (Histoire/Sciences/Médecine/Religion, manquantes jusqu'ici — voir le bug rapporté).
+# Passé en autocomplete (liste illimitée, filtrée par ce que l'utilisateur tape)
+# plutôt que de retirer des options existantes pour rester sous la limite.
+SET_STAT_OPTIONS = [
+    ("💚 PV Maximum", "pv_max"),
+    ("💚 PV Actuels", "pv_actuel"),
+    ("🔵 Mana Maximum", "mana_max"),
+    ("🔵 Mana Actuel", "mana"),
+    ("🟨 Ferveur", "ferveur"),
+    ("📖 Versets", "versets"),
+    ("🔴 Tension", "tension"),
+    ("💪 Physique (Force)", "phy"),
+    ("🛡️ Constitution", "const"),
+    ("💨 Agilité", "agi"),
+    ("✨ Esprit (Magie)", "esp"),
+    ("🧠 Intelligence", "int_stat"),
+    ("🙏 Foi", "foi"),
+    ("🦉 Sagesse", "sag"),
+    ("🧱 Robustesse (Armure/Items)", "robustesse"),
+    ("🗣️ Oral", "oral"),
+    ("👻 Discrétion", "discretion"),
+    ("🤸 Acrobatie", "acrobatie"),
+    ("💪 Force RP", "force_rp"),
+    ("🏕️ Survie", "survie"),
+    ("📜 Histoire", "histoire"),
+    ("⚗️ Sciences", "sciences"),
+    ("💉 Médecine", "medecine"),
+    ("🙏 Religion", "religion"),
+    ("⚔️ Bonus Base (items)", "bonus_base_item"),
+    ("🎲 Bonus Pièces (items)", "bonus_pieces_item"),
+    ("💚 Bonus PV Max (items)", "pv_max_bonus_item"),
+    ("🔵 Bonus Mana Max (items)", "mana_max_bonus_item"),
+]
+SET_STAT_VALEURS_VALIDES = {value for _, value in SET_STAT_OPTIONS}
+SET_STAT_NOMS = {value: nom for nom, value in SET_STAT_OPTIONS}
+
+
+async def set_stat_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    return [
+        app_commands.Choice(name=nom, value=value)
+        for nom, value in SET_STAT_OPTIONS
+        if cur in nom.lower() or cur in value.lower()
+    ][:25]
+
+
 @bot.tree.command(name="set_stat", description="Modifier manuellement vos stats (Pour appliquer vos Passifs/Bonus)")
 @app_commands.describe(stat="La statistique à modifier", valeur="La nouvelle valeur EXACTE")
-@app_commands.choices(stat=[
-    app_commands.Choice(name="💚 PV Maximum", value="pv_max"),
-    app_commands.Choice(name="💚 PV Actuels", value="pv_actuel"),
-    app_commands.Choice(name="🔵 Mana Maximum", value="mana_max"),
-    app_commands.Choice(name="🔵 Mana Actuel", value="mana"),
-    app_commands.Choice(name="🟨 Ferveur", value="ferveur"),
-    app_commands.Choice(name="📖 Versets", value="versets"),
-    app_commands.Choice(name="🔴 Tension", value="tension"),
-    app_commands.Choice(name="💪 Physique (Force)", value="phy"),
-    app_commands.Choice(name="🛡️ Constitution", value="const"),
-    app_commands.Choice(name="💨 Agilité", value="agi"),
-    app_commands.Choice(name="✨ Esprit (Magie)", value="esp"),
-    app_commands.Choice(name="🧠 Intelligence", value="int_stat"),
-    app_commands.Choice(name="🙏 Foi", value="foi"),
-    app_commands.Choice(name="🦉 Sagesse", value="sag"),
-    app_commands.Choice(name="🧱 Robustesse (Armure/Items)", value="robustesse"),
-    app_commands.Choice(name="🗣️ Oral", value="oral"),
-    app_commands.Choice(name="👻 Discrétion", value="discretion"),
-    app_commands.Choice(name="🤸 Acrobatie", value="acrobatie"),
-    app_commands.Choice(name="💪 Force RP", value="force_rp"),
-    app_commands.Choice(name="🏕️ Survie", value="survie"),
-    app_commands.Choice(name="⚔️ Bonus Base (items)", value="bonus_base_item"),
-    app_commands.Choice(name="🎲 Bonus Pièces (items)", value="bonus_pieces_item"),
-    app_commands.Choice(name="💚 Bonus PV Max (items)", value="pv_max_bonus_item"),
-    app_commands.Choice(name="🔵 Bonus Mana Max (items)", value="mana_max_bonus_item"),
-])
-async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[str], valeur: int):
+@app_commands.autocomplete(stat=set_stat_autocomplete)
+async def set_stat(interaction: discord.Interaction, stat: str, valeur: int):
     # 1. Chargement
     p: Personnage = Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
 
+    # stat est un texte libre (avec suggestions) et non plus un choix Discord
+    # imposé : on valide nous-même contre la liste, sinon setattr plus bas
+    # pourrait écrire sur n'importe quel attribut du personnage.
+    if stat not in SET_STAT_VALEURS_VALIDES:
+        return await interaction.response.send_message("❌ Statistique invalide. Utilisez l'autocomplétion.", ephemeral=True)
+
     # 2. Récupération de l'ancienne valeur (pour l'affichage)
-    code_stat = stat.value
+    code_stat = stat
     ancienne_valeur = getattr(p, code_stat, 0)
     
     # 3. Modification
@@ -5873,7 +5902,7 @@ async def set_stat(interaction: discord.Interaction, stat: app_commands.Choice[s
 
     # 4. Confirmation
     embed = discord.Embed(title="✍️ Modification Manuelle", color=0x3498db)
-    embed.description = f"**{stat.name}** modifiée."
+    embed.description = f"**{SET_STAT_NOMS.get(stat, stat)}** modifiée."
     embed.add_field(name="Avant", value=str(ancienne_valeur), inline=True)
     embed.add_field(name="Après", value=f"**{valeur}**", inline=True)
     embed.set_footer(text="C'est à vous de tenir vos comptes à jour selon vos passifs !")
