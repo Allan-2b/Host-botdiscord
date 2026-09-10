@@ -6838,6 +6838,35 @@ async def help(interaction: discord.Interaction):
 
 
 
+# Libellés courts pour afficher le bonus MÉCANIQUE réel (bonus_json) d'un item dans
+# /inventaire — la description d'un item est du texte narratif libre qui ne reflète pas
+# forcément ses vraies stats, ce qui rendait impossible de vérifier "pourquoi ma stat a
+# changé" sans aller lire la base de données.
+ITEM_BONUS_LABELS = {
+    "phy": "PHY", "esp": "ESP", "agi": "AGI", "const": "CON", "foi": "FOI", "sag": "SAG", "int_stat": "INT",
+    "pv_max": "PV Max", "mana_max": "Mana Max", "rob": "Robustesse", "robustesse": "Robustesse",
+    "bonus_base_item": "Bonus Base", "bonus_pieces_item": "Bonus Pièces",
+    "versets_max": "Versets Max", "discretion": "Discrétion", "histoire": "Histoire",
+    "medecine": "Médecine", "sciences": "Sciences", "religion": "Religion",
+    "acrobatie": "Acrobatie", "oral": "Oral", "force_rp": "Force RP", "survie": "Survie",
+}
+
+
+def format_bonus_json(bonus_json_str: str) -> str:
+    try:
+        bj = json.loads(bonus_json_str or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    if not bj:
+        return ""
+    parts = []
+    for key, val in bj.items():
+        label = ITEM_BONUS_LABELS.get(key, key)
+        signe = "+" if val >= 0 else ""
+        parts.append(f"{signe}{val} {label}")
+    return ", ".join(parts)
+
+
 @bot.tree.command(name="inventaire", description="Voir votre sac et équipement")
 async def inventaire(interaction: discord.Interaction):
     user_id = interaction.user.id
@@ -6846,7 +6875,7 @@ async def inventaire(interaction: discord.Interaction):
 
     items = conn.execute('''
         SELECT i.id, i.equipe, i.identifie,
-               c.nom, c.slot, c.description, c.rarete, c.points_limite, c.necessite_etude
+               c.nom, c.slot, c.description, c.rarete, c.points_limite, c.necessite_etude, c.bonus_json
         FROM inventaire i
         JOIN config_items c ON i.item_ref = c.ref
         WHERE i.user_id = ?
@@ -6877,6 +6906,9 @@ async def inventaire(interaction: discord.Interaction):
             ligne = f"• **???** {em_slot} *(Non identifié — `/etudier {item['id']}`)* [{id_str}]\n  *Description cachée jusqu'à identification complète.*\n"
         else:
             ligne = f"• **{item['nom']}** {em_rare}{em_slot} — {pts}pts [{id_str}]\n  *{item['description']}*\n"
+            bonus_txt = format_bonus_json(item['bonus_json'])
+            if bonus_txt:
+                ligne += f"  🎯 Bonus : {bonus_txt}\n"
 
         if item['equipe']:
             pts_util += pts
