@@ -7929,40 +7929,108 @@ async def gm_creer(interaction: discord.Interaction, nom: str, classe: app_comma
         await interaction.response.send_message(f"Erreur: {e}", ephemeral=True)
 
 
+def _appliquer_levelup(p: Personnage, niveaux: int) -> tuple:
+    """Applique X niveaux à un personnage (points, évolution raciale, recalcul des
+    stats dérivées) et sauvegarde. Réutilisé par /gm_levelup et /gm_levelup_multi.
+    Retourne (ancien_niveau, message_evolution_raciale_ou_None)."""
+    ancien_niv = p.niveau
+    p.niveau += niveaux
+    # On récupère les messages d'évolution avant de sauvegarder
+    msg_race = p.verifier_evolution_race(niveaux)
+
+    p.points_stat += (1 * niveaux)
+    p.points_attribut += (1 * niveaux)
+    p.points_comp += (1 * niveaux)
+
+    p.recalculer_derives()
+    p.pv_actuel = p.pv_max
+    p.sauvegarder()
+    return ancien_niv, msg_race
+
+
 @bot.tree.command(name="gm_levelup", description="(GM) Faire monter un joueur de niveau")
 @app_commands.describe(joueur="Le joueur à level up", niveaux="Nombre de niveaux (défaut 1)")
 async def gm_levelup(interaction: discord.Interaction, joueur: discord.Member, niveaux: int = 1):
-    if not is_gm(interaction.user.id): 
+    if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
     p = Personnage.charger(joueur.id)
     if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
 
-    ancien_niv = p.niveau
-    anciens_pv = p.pv_max
-    anciens_mana = p.mana_max
-    
-    p.niveau += niveaux
-    # On récupère les messages d'évolution avant de sauvegarder
-    msg_race = p.verifier_evolution_race(niveaux)
-    
-    p.points_stat += (1 * niveaux)
-    p.points_attribut += (1 * niveaux)
-    p.points_comp += (1 * niveaux)
-    
-    p.recalculer_derives()
-    p.pv_actuel = p.pv_max
-    p.sauvegarder()
+    ancien_niv, msg_race = _appliquer_levelup(p, niveaux)
 
     embed = discord.Embed(title="🎉 LEVEL UP !", description=f"Félicitations {joueur.mention} !", color=0xF1C40F)
     embed.add_field(name="Niveau", value=f"{ancien_niv} ➔ **{p.niveau}**", inline=False)
-    
+
     if msg_race:
         embed.add_field(name="🧬 Évolution", value=msg_race, inline=False)
-    
+
     embed.add_field(name="Points Gagnés", value=f"💪 Stats: +{niveaux}\n🧠 Attr: +{niveaux}\n✨ Comp: +{niveaux}", inline=True)
     await interaction.response.send_message(content=f"{joueur.mention}", embed=embed)
 
+
+@bot.tree.command(name="gm_levelup_multi", description="(GM) Faire monter PLUSIEURS personnages de niveau en une seule commande")
+@app_commands.describe(
+    niveaux="Nombre de niveaux à ajouter à chaque personnage (défaut 1)",
+    cibles="@mentions ou 'user_id:nom' séparés par espaces/virgules (ignoré si tous=Vrai)",
+    tous="Level up TOUS les personnages ayant une session active — ignore 'cibles'",
+)
+async def gm_levelup_multi(interaction: discord.Interaction, niveaux: int = 1, cibles: str = None, tous: bool = False):
+    if not is_gm(interaction.user.id):
+        return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+    if not tous and not cibles:
+        return await interaction.response.send_message(
+            "❌ Précisez des cibles (@mentions ou `user_id:nom` séparés par espaces/virgules), ou mettez `tous: Vrai`.",
+            ephemeral=True,
+        )
+
+    await interaction.response.defer()
+
+    if tous:
+        conn = get_db_connection()
+        rows = conn.execute("""
+            SELECT j.user_id, j.nom FROM sessions s
+            JOIN joueurs j ON j.user_id = s.user_id AND j.nom = s.nom_perso_actif
+        """).fetchall()
+        conn.close()
+        persos = [px for px in (Personnage.charger_par_nom(r['user_id'], r['nom']) for r in rows) if px]
+    else:
+        persos = parse_cibles_sec(cibles)
+
+    if not persos:
+        return await interaction.followup.send("❌ Aucun personnage valide trouvé parmi les cibles.", ephemeral=True)
+
+    lignes = []
+    for p in persos:
+        ancien_niv, msg_race = _appliquer_levelup(p, niveaux)
+        ligne = f"**{p.nom}** : {ancien_niv} ➔ **{p.niveau}**"
+        if msg_race:
+            ligne += f"\n{msg_race}"
+        lignes.append(ligne)
+
+    # Découpage en plusieurs champs (limite Discord : ~1024 caractères par champ)
+    chunks = []
+    courant = ""
+    for ligne in lignes:
+        if len(courant) + len(ligne) + 2 > 1000:
+            chunks.append(courant)
+            courant = ""
+        courant += ligne + "\n\n"
+    if courant:
+        chunks.append(courant)
+
+    embed = discord.Embed(
+        title=f"🎉 LEVEL UP MULTIPLE (+{niveaux} niveau{'x' if niveaux > 1 else ''})",
+        description=f"{len(persos)} personnage(s) mis à jour.",
+        color=0xF1C40F,
+    )
+    for i, chunk in enumerate(chunks[:24], 1):
+        nom_champ = "Résultats" if len(chunks) == 1 else f"Résultats ({i}/{len(chunks)})"
+        embed.add_field(name=nom_champ, value=chunk.strip(), inline=False)
+    if len(chunks) > 24:
+        embed.set_footer(text=f"⚠️ {len(chunks) - 24} champ(s) supplémentaire(s) non affiché(s) (trop de personnages pour un seul embed).")
+
+    await interaction.followup.send(embed=embed)
 
 
 @bot.tree.command(name="gm_set_stat", description="(GM) Forcer une statistique à une valeur précise (Pour Monstres/Boss)")
