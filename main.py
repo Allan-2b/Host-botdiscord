@@ -7948,45 +7948,65 @@ def _appliquer_levelup(p: Personnage, niveaux: int) -> tuple:
     return ancien_niv, msg_race
 
 
-@bot.tree.command(name="gm_levelup", description="(GM) Faire monter un joueur de niveau")
-@app_commands.describe(joueur="Le joueur à level up", niveaux="Nombre de niveaux (défaut 1)")
-async def gm_levelup(interaction: discord.Interaction, joueur: discord.Member, niveaux: int = 1):
+@bot.tree.command(name="gm_levelup", description="(GM) Faire monter un joueur (ou une fiche précise, même inactive) de niveau")
+@app_commands.describe(
+    joueur="Le joueur à level up (utilise sa fiche ACTIVE — laisser vide si vous ciblez via cible_fiche)",
+    niveaux="Nombre de niveaux (défaut 1)",
+    cible_fiche="[Optionnel] Cible une fiche précise par nom, même non active (ex: un PNJ) — prioritaire sur 'joueur'",
+)
+@app_commands.autocomplete(cible_fiche=cible_fiche_autocomplete)
+async def gm_levelup(interaction: discord.Interaction, joueur: discord.Member = None, niveaux: int = 1, cible_fiche: str = None):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
-    p = Personnage.charger(joueur.id)
-    if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
+    if cible_fiche:
+        p = parse_cible_arg(cible_fiche)
+        if not p: return await interaction.response.send_message("❌ Fiche introuvable.", ephemeral=True)
+    elif joueur:
+        p = Personnage.charger(joueur.id)
+        if not p: return await interaction.response.send_message("❌ Pas de fiche.", ephemeral=True)
+    else:
+        return await interaction.response.send_message("❌ Précisez `joueur` ou `cible_fiche`.", ephemeral=True)
 
     ancien_niv, msg_race = _appliquer_levelup(p, niveaux)
 
-    embed = discord.Embed(title="🎉 LEVEL UP !", description=f"Félicitations {joueur.mention} !", color=0xF1C40F)
+    sujet = joueur.mention if (joueur and not cible_fiche) else f"**{p.nom}**"
+    embed = discord.Embed(title="🎉 LEVEL UP !", description=f"Félicitations {sujet} !", color=0xF1C40F)
     embed.add_field(name="Niveau", value=f"{ancien_niv} ➔ **{p.niveau}**", inline=False)
 
     if msg_race:
         embed.add_field(name="🧬 Évolution", value=msg_race, inline=False)
 
     embed.add_field(name="Points Gagnés", value=f"💪 Stats: +{niveaux}\n🧠 Attr: +{niveaux}\n✨ Comp: +{niveaux}", inline=True)
-    await interaction.response.send_message(content=f"{joueur.mention}", embed=embed)
+    await interaction.response.send_message(content=(joueur.mention if (joueur and not cible_fiche) else None), embed=embed)
 
 
 @bot.tree.command(name="gm_levelup_multi", description="(GM) Faire monter PLUSIEURS personnages de niveau en une seule commande")
 @app_commands.describe(
     niveaux="Nombre de niveaux à ajouter à chaque personnage (défaut 1)",
-    cibles="@mentions ou 'user_id:nom' séparés par espaces/virgules (ignoré si tous=Vrai)",
-    tous="Level up TOUS les personnages ayant une session active — ignore 'cibles'",
+    cibles="@mentions ou 'user_id:nom' séparés par espaces/virgules (fiche précise même inactive avec user_id:nom)",
+    tous="Level up TOUTES les fiches ACTIVES (une par joueur en session) — ignore 'cibles'/'mes_fiches'",
+    mes_fiches="Level up TOUTES VOS fiches à vous (actives ou non — pratique pour lvl up tous vos PNJ) — ignore 'cibles'/'tous'",
 )
-async def gm_levelup_multi(interaction: discord.Interaction, niveaux: int = 1, cibles: str = None, tous: bool = False):
+async def gm_levelup_multi(interaction: discord.Interaction, niveaux: int = 1, cibles: str = None, tous: bool = False, mes_fiches: bool = False):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
-    if not tous and not cibles:
+    if not tous and not mes_fiches and not cibles:
         return await interaction.response.send_message(
-            "❌ Précisez des cibles (@mentions ou `user_id:nom` séparés par espaces/virgules), ou mettez `tous: Vrai`.",
+            "❌ Précisez des cibles (@mentions ou `user_id:nom` séparés par espaces/virgules), ou mettez `tous: Vrai` / `mes_fiches: Vrai`.",
             ephemeral=True,
         )
 
     await interaction.response.defer()
 
-    if tous:
+    if mes_fiches:
+        # Cible TOUTES les fiches appartenant au MJ, actives ou non (ses PNJ notamment) —
+        # contrairement à "tous", qui ne prend que la fiche ACTIVE de chaque joueur en session.
+        conn = get_db_connection()
+        rows = conn.execute("SELECT nom FROM joueurs WHERE user_id = ?", (interaction.user.id,)).fetchall()
+        conn.close()
+        persos = [px for px in (Personnage.charger_par_nom(interaction.user.id, r['nom']) for r in rows) if px]
+    elif tous:
         conn = get_db_connection()
         rows = conn.execute("""
             SELECT j.user_id, j.nom FROM sessions s
