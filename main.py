@@ -8160,7 +8160,8 @@ async def gm_set_stat(interaction: discord.Interaction, stat: app_commands.Choic
     bonus="Bonus par pièce",
     stat="Statistique utilisée",
     effets_cible="Effets sur la CIBLE : format 'effet:duree effet2:duree2' (ex: poison:2 stun:1)",
-    effets_soi="Effets sur SOI-MÊME : format 'effet:duree' (ex: dmg_boost:3 hate:1)"
+    effets_soi="Effets sur SOI-MÊME : format 'effet:duree' (ex: dmg_boost:3 hate:1)",
+    confirmer_remplacement="Mettre à Vrai UNIQUEMENT si vous voulez vraiment écraser un sort existant portant déjà ce 'ref'"
 )
 @app_commands.autocomplete(classe=classe_autocomplete, stat=stat_autocomplete, specialisation=spe_autocomplete)
 @app_commands.choices(visibilite=[
@@ -8192,7 +8193,8 @@ async def gm_creer_sort(
     bonus: int = 0,
     stat: str = None,
     effets_cible: str = None,
-    effets_soi: str = None
+    effets_soi: str = None,
+    confirmer_remplacement: bool = False
 ):
     # Sécurité GM
     if not is_gm(interaction.user.id):
@@ -8244,14 +8246,34 @@ async def gm_creer_sort(
     data_json_str = json.dumps(data) if data else "{}"
 
     # 6. Sauvegarde
+    ref_clean_sort = ref.lower()
     conn = get_db_connection()
     try:
+        # Même bug que /gm_creer_item : "ref" est la clé primaire de config_sorts,
+        # donc un INSERT OR REPLACE sur un ref déjà utilisé écraserait silencieusement
+        # un sort existant (coût/dégâts/effets) pour tous les joueurs qui l'ont déjà
+        # appris, sans notification. On bloque ce cas par défaut.
+        existant_sort = conn.execute("SELECT nom, classes FROM config_sorts WHERE ref = ?", (ref_clean_sort,)).fetchone()
+        if existant_sort and not confirmer_remplacement:
+            nb_possesseurs = conn.execute(
+                "SELECT COUNT(*) AS n FROM joueurs WHERE competences LIKE ?", (f'%"{ref_clean_sort}"%',)
+            ).fetchone()['n']
+            conn.close()
+            return await interaction.response.send_message(
+                f"⚠️ **La référence `{ref_clean_sort}` est déjà utilisée** par le sort **{existant_sort['nom']}**.\n"
+                f"👥 **{nb_possesseurs}** personnage(s) connaissent déjà ce sort — le recréer avec le même `ref` "
+                f"écraserait ses effets/coûts pour tous ceux qui l'ont appris, sans notification.\n\n"
+                f"➡️ Choisissez un **autre `ref`** pour un nouveau sort, ou relancez cette commande avec "
+                f"`confirmer_remplacement: Vrai` si vous voulez vraiment remplacer **{existant_sort['nom']}**.",
+                ephemeral=True,
+            )
+
         conn.execute('''
             INSERT OR REPLACE INTO config_sorts
             (ref, nom, classes, pallier, cout_achat, base, coins, bonus, stat_type, cout, cout_type, versets, cooldown, desc, type, cat, data_json)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            ref.lower(), nom, json.dumps(classes_list), pallier, 1,
+            ref_clean_sort, nom, json.dumps(classes_list), pallier, 1,
             base, coins, bonus, stat_db, cout, cout_type, versets, cooldown, description,
             type_sort.value, cat, data_json_str
         ))
@@ -8526,7 +8548,8 @@ async def set_autocomplete(interaction: discord.Interaction, current: str):
     bonus_type3="Bonus tertiaire (optionnel)",
     bonus_valeur3="Valeur du bonus tertiaire",
     necessite_etude="L'objet doit-il être étudié avant de fonctionner ?",
-    set_ref="(Optionnel) Associer directement à un set existant"
+    set_ref="(Optionnel) Associer directement à un set existant",
+    confirmer_remplacement="Mettre à Vrai UNIQUEMENT si vous voulez vraiment écraser un item existant portant déjà ce 'ref'"
 )
 @app_commands.choices(
     slot=[
@@ -8626,7 +8649,8 @@ async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, sl
                         bonus_type: app_commands.Choice[str] = None, bonus_valeur: int = 0,
                         bonus_type2: app_commands.Choice[str] = None, bonus_valeur2: int = 0,
                         bonus_type3: app_commands.Choice[str] = None, bonus_valeur3: int = 0,
-                        necessite_etude: bool = False, set_ref: str = None):
+                        necessite_etude: bool = False, set_ref: str = None,
+                        confirmer_remplacement: bool = False):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
 
@@ -8647,18 +8671,39 @@ async def gm_creer_item(interaction: discord.Interaction, ref: str, nom: str, sl
     ref_clean = ref.lower()
     conn = get_db_connection()
     try:
+        # BUG signalé en jeu : "ref" est la clé primaire de config_items, donc un
+        # INSERT OR REPLACE avec un ref déjà utilisé écrasait silencieusement
+        # l'ancien item (nom/stats/rareté) — tous les joueurs qui le possédaient
+        # se retrouvaient avec les stats du nouvel item du jour au lendemain,
+        # sans aucune notification. On bloque désormais ce cas par défaut.
+        existant = conn.execute("SELECT nom, slot, rarete FROM config_items WHERE ref = ?", (ref_clean,)).fetchone()
+        if existant and not confirmer_remplacement:
+            nb_possesseurs = conn.execute(
+                "SELECT COUNT(DISTINCT user_id) AS n FROM inventaire WHERE item_ref = ?", (ref_clean,)
+            ).fetchone()['n']
+            conn.close()
+            return await interaction.response.send_message(
+                f"⚠️ **La référence `{ref_clean}` est déjà utilisée** par l'item **{existant['nom']}** "
+                f"({existant['slot']}, {existant['rarete']}).\n"
+                f"👥 **{nb_possesseurs}** joueur(s) possèdent actuellement cet item — le recréer avec le même "
+                f"`ref` écraserait ses stats pour tous ceux qui le possèdent déjà, sans notification.\n\n"
+                f"➡️ Choisissez un **autre `ref`** pour un nouvel item, ou relancez cette commande avec "
+                f"`confirmer_remplacement: Vrai` si vous voulez vraiment remplacer **{existant['nom']}**.",
+                ephemeral=True,
+            )
+
         conn.execute(
             "INSERT OR REPLACE INTO config_items (ref, nom, slot, description, rarete, bonus_json, points_limite, necessite_etude) VALUES (?,?,?,?,?,?,?,?)",
             (ref_clean, nom, slot.value, description, rarete_val, bonus_json, pts, 1 if necessite_etude else 0)
         )
-        set_msg = ""
+        set_msg = "\n🔁 **Item existant remplacé** (ref déjà utilisée, confirmé)." if existant else ""
         if set_ref and set_ref != "none":
             s = conn.execute("SELECT nom FROM config_sets WHERE set_ref=?", (set_ref,)).fetchone()
             if s:
                 conn.execute("INSERT OR IGNORE INTO config_set_items VALUES (?,?)", (set_ref, ref_clean))
-                set_msg = f"\n🔮 Ajouté au set **{s['nom']}**."
+                set_msg += f"\n🔮 Ajouté au set **{s['nom']}**."
             else:
-                set_msg = "\n⚠️ Set introuvable, item créé sans association."
+                set_msg += "\n⚠️ Set introuvable, item créé sans association."
         conn.commit()
         RARETE_EMOJI = {"commun":"⚪","peu_commun":"🟢","rare":"🔵","epique":"🟣","legendaire":"🟠"}
         emoji = RARETE_EMOJI.get(rarete_val, "⚪")
