@@ -4017,31 +4017,33 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
         tot_a, vis_a, heads_a = lancer_clash(tmp_a, bonus_lvl_a, malus_a, hate_a, force_pile=fp_a)
         tot_b, vis_b, heads_b = lancer_clash(tmp_b, bonus_lvl_b, malus_b, hate_b, force_pile=fp_b)
 
-        # --- Moine du Lotus : +4 Base si Perturbé | +2 Base si Éveil P5 ---
+        # --- Moine du Lotus : +2 Base si Perturbé | +1 Base si Éveil P5 ---
         if "moine_lotus" in p_attaquant.sous_classes_unlocked:
             if "passif_lotus_eveil" in p_attaquant.competences:
-                tot_a += 2; vis_a.append("+2(Éveil)")
+                tot_a += 1; vis_a.append("+1(Éveil)")
             elif not p_attaquant.concentre:
-                tot_a += 4; vis_a.append("🔥+4(Perturbé)")
+                tot_a += 2; vis_a.append("🔥+2(Perturbé)")
         if "moine_lotus" in p_defenseur.sous_classes_unlocked:
             if "passif_lotus_eveil" in p_defenseur.competences:
-                tot_b += 2; vis_b.append("+2(Éveil)")
+                tot_b += 1; vis_b.append("+1(Éveil)")
             elif not p_defenseur.concentre:
-                tot_b += 4; vis_b.append("🔥+4(Perturbé)")
+                tot_b += 2; vis_b.append("🔥+2(Perturbé)")
 
-        # --- Légion de Fer : -3 Base en Posture (-1 si Implacable P4) ---
+        # --- Légion de Fer : -1 Base en Posture (0 si Implacable P4) ---
         if "legion_fer" in p_attaquant.sous_classes_unlocked and p_attaquant.posture_active:
-            malus_p = 1 if "passif_legion_implacable" in p_attaquant.competences else 3
-            tot_a -= malus_p; vis_a.append(f"🛡️(-{malus_p} Posture)")
+            malus_p = 0 if "passif_legion_implacable" in p_attaquant.competences else 1
+            if malus_p:
+                tot_a -= malus_p; vis_a.append(f"🛡️(-{malus_p} Posture)")
         if "legion_fer" in p_defenseur.sous_classes_unlocked and p_defenseur.posture_active:
-            malus_p = 1 if "passif_legion_implacable" in p_defenseur.competences else 3
-            tot_b -= malus_p; vis_b.append(f"🛡️(-{malus_p} Posture)")
+            malus_p = 0 if "passif_legion_implacable" in p_defenseur.competences else 1
+            if malus_p:
+                tot_b -= malus_p; vis_b.append(f"🛡️(-{malus_p} Posture)")
 
-        # --- Drakéide : +1 dégât par palier de 3 niveaux ---
-        drake_a = p_attaquant.niveau // 3
+        # --- Drakéide : +3 dégâts par palier de 3 niveaux ---
+        drake_a = (p_attaquant.niveau // 3) * 3
         if p_attaquant.race == "Drakéide" and drake_a > 0:
             tot_a += drake_a; vis_a.append(f"🐲+{drake_a}(Drakéide)")
-        drake_b = p_defenseur.niveau // 3
+        drake_b = (p_defenseur.niveau // 3) * 3
         if p_defenseur.race == "Drakéide" and drake_b > 0:
             tot_b += drake_b; vis_b.append(f"🐲+{drake_b}(Drakéide)")
         fp_a = False; fp_b = False  # Ne s'applique qu'au premier round
