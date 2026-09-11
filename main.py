@@ -4039,13 +4039,6 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
             if malus_p:
                 tot_b -= malus_p; vis_b.append(f"🛡️(-{malus_p} Posture)")
 
-        # --- Drakéide : +3 dégâts par palier de 3 niveaux ---
-        drake_a = (p_attaquant.niveau // 3) * 3
-        if p_attaquant.race == "Drakéide" and drake_a > 0:
-            tot_a += drake_a; vis_a.append(f"🐲+{drake_a}(Drakéide)")
-        drake_b = (p_defenseur.niveau // 3) * 3
-        if p_defenseur.race == "Drakéide" and drake_b > 0:
-            tot_b += drake_b; vis_b.append(f"🐲+{drake_b}(Drakéide)")
         fp_a = False; fp_b = False  # Ne s'applique qu'au premier round
         
         # Résonance Divine supprimée — Ferveur gagnée uniquement via Prière Constante (+5/tour)
@@ -4129,6 +4122,12 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
         final_skill = Skill(skill_vainqueur.nom, skill_vainqueur.base, skill_vainqueur.bonus, pieces_restantes, skill_vainqueur.stat_bonus, stat_nom=s_nom_safe)
 
         damage_final, vis_fin, heads_final = final_skill.roll(bonus_niveau=bonus_v)
+
+        # --- Drakéide : +3 dégâts finaux par palier de 3 niveaux (uniquement sur les dégâts, pas dans le clash) ---
+        if vainqueur.race == "Drakéide" and vainqueur.niveau >= 3:
+            bonus_drake = (vainqueur.niveau // 3) * 3
+            damage_final += bonus_drake
+            vis_fin.append(f"🐲+{bonus_drake}(Drakéide)")
 
 
 
