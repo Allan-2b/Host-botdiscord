@@ -1084,6 +1084,75 @@ class Skill:
         total = self.base + (self.bonus * heads) + self.stat_bonus + bonus_niveau
         return total, details, heads
 
+
+# ── Équilibrage du duel de Clash (glass cannon vs build équilibré) ──────────────
+# Avant : la stat brute (PHY/ESP/FOI) était ajoutée telle quelle à CHAQUE round du
+# duel de clash, donc un gros écart de stat gagnait pratiquement tous les rounds
+# d'affilée (les dés ne pouvaient quasiment jamais compenser), écrasant les builds
+# qui avaient réparti leurs points plutôt que tout mis en attaque.
+# Maintenant : la stat ne compte plus directement dans le jet de chaque round (elle
+# reste utilisée pour les DÉGÂTS une fois le duel gagné, via Skill.stat_bonus dans le
+# jet final — inchangé). Dans le duel lui-même, seul l'excédent au-dessus d'un socle
+# "normal" (CLASH_STAT_SEUIL) influence les ÉGALITÉS de dés entre les deux jets — via
+# une pièce pondérée, jamais un résultat garanti (contrairement à "le plus fort gagne
+# l'égalité automatiquement", qui donnerait un même ~78% dès le moindre écart au lieu
+# d'une progression douce). Calibré (simulé) pour qu'un écart de 10 points au-dessus
+# du socle (ex: 25 vs 15) donne ~65-70% de victoires au plus fort, au lieu de quasi
+# 100% actuellement.
+CLASH_STAT_SEUIL = 10
+CLASH_STAT_K = 0.03
+
+
+def clash_proba_egalite(stat_a: int, stat_b: int) -> float:
+    """Probabilité que le camp A remporte une égalité de dés en duel de clash,
+    selon l'écart de stat brute au-dessus du socle CLASH_STAT_SEUIL. 0.5 si égal
+    ou si les deux sont sous le socle ; jamais garanti (borné à 5%-95%)."""
+    excedent_a = max(0, stat_a - CLASH_STAT_SEUIL)
+    excedent_b = max(0, stat_b - CLASH_STAT_SEUIL)
+    return min(0.95, max(0.05, 0.5 + CLASH_STAT_K * (excedent_a - excedent_b)))
+
+
+def clash_estimer_victoire(coins_a: int, coins_b: int, base_a: int, bonus_a: int,
+                            base_b: int, bonus_b: int, bonus_niveau_a: int, bonus_niveau_b: int,
+                            proba_egalite_a: float, n: int = 3000) -> float:
+    """Estime (par simulation rapide, non affichée) le % de chances que le camp A
+    remporte le RESTE du duel depuis l'état actuel des pièces — pour l'affichage
+    "chances de victoire" au début du clash et à chaque round. Approximation : ne
+    tient compte que du cœur du jet (base/pièces/bonus par tête/bonus de niveau/tie-
+    break) et pas des passifs de classe ponctuels (Moine, Légion, Drakéide, etc.) qui
+    peuvent s'ajouter en cours de round — donc annoncé comme une ESTIMATION, jamais
+    une garantie. Utilise un générateur aléatoire dédié : n'interfère jamais avec les
+    vrais jets de dés du combat."""
+    if coins_a <= 0 and coins_b <= 0:
+        return 50.0
+    if coins_a <= 0:
+        return 0.0
+    if coins_b <= 0:
+        return 100.0
+    rng = random.Random()
+    victoires_a = 0
+    for _ in range(n):
+        ca, cb = coins_a, coins_b
+        tours = 0
+        while ca > 0 and cb > 0 and tours <= 25:
+            ha = sum(1 for _ in range(ca) if rng.random() < 0.5)
+            hb = sum(1 for _ in range(cb) if rng.random() < 0.5)
+            ta = base_a + bonus_a * ha + bonus_niveau_a
+            tb = base_b + bonus_b * hb + bonus_niveau_b
+            if ta > tb:
+                cb -= 1
+            elif tb > ta:
+                ca -= 1
+            else:
+                if rng.random() < proba_egalite_a:
+                    cb -= 1
+                else:
+                    ca -= 1
+            tours += 1
+        if ca > 0 and cb <= 0:
+            victoires_a += 1
+    return victoires_a / n * 100
+
 # Coefficient de rééquilibrage des soins (-30% pour raccourcir les combats)
 COEFF_HEAL = 0.7
 
@@ -3880,7 +3949,21 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
             skill_b_org.coins += pieces_bonus_d_rip
             msg_bonus_manuel_rip += f"\n🎯 **Désignation** : +{pieces_bonus_d_rip} Pièces !"
 
-    await interaction.followup.send(f"⚔️ **Le Clash commence !**\n🔴 **{p_attaquant.nom}** vs 🔵 **{p_defenseur.nom}**{msg_hemo}{msg_bonus_manuel_rip}")
+    # Équilibrage glass cannon : la stat brute ne gagne plus le round directement
+    # (voir clash_proba_egalite) — calculée une fois, la stat ne change pas en cours
+    # de duel. Ne remplace pas skill_a_org/skill_b_org.stat_bonus, qui reste utilisé
+    # tel quel pour les DÉGÂTS une fois le duel gagné (roll final plus bas, inchangé).
+    proba_egalite_a = clash_proba_egalite(skill_a_org.stat_bonus, skill_b_org.stat_bonus)
+    pct_victoire_a_initial = clash_estimer_victoire(
+        skill_a_org.coins, skill_b_org.coins, skill_a_org.base, skill_a_org.bonus,
+        skill_b_org.base, skill_b_org.bonus, p_attaquant.get_bonus_niveau(), p_defenseur.get_bonus_niveau(),
+        proba_egalite_a,
+    )
+    msg_pct_initial = (
+        f"\n📊 *Chances de victoire estimées : {p_attaquant.nom} **{pct_victoire_a_initial:.0f}%** "
+        f"/ {p_defenseur.nom} **{100 - pct_victoire_a_initial:.0f}%***"
+    )
+    await interaction.followup.send(f"⚔️ **Le Clash commence !**\n🔴 **{p_attaquant.nom}** vs 🔵 **{p_defenseur.nom}**{msg_hemo}{msg_bonus_manuel_rip}{msg_pct_initial}")
 
 # --- CALCUL DES MALUS ET BONUS ---
     # Poison : (5 + lvl) // 5
@@ -3923,9 +4006,11 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
                 vis.append("☠️")
             return tot, vis, h
 
-        # Création skills temporaires pour le round
-        tmp_a = Skill(skill_a_org.nom, skill_a_org.base, skill_a_org.bonus, coins_a, skill_a_org.stat_bonus, stat_nom=getattr(skill_a_org, 'stat_nom', ''))
-        tmp_b = Skill(skill_b_org.nom, skill_b_org.base, skill_b_org.bonus, coins_b, skill_b_org.stat_bonus, stat_nom=getattr(skill_b_org, 'stat_nom', ''))
+        # Création skills temporaires pour le round — stat_bonus à 0 : la stat brute
+        # n'influence plus directement le jet de chaque round (voir clash_proba_egalite
+        # plus haut), seulement les dégâts finaux une fois le duel gagné (inchangé).
+        tmp_a = Skill(skill_a_org.nom, skill_a_org.base, skill_a_org.bonus, coins_a, 0, stat_nom=getattr(skill_a_org, 'stat_nom', ''))
+        tmp_b = Skill(skill_b_org.nom, skill_b_org.base, skill_b_org.bonus, coins_b, 0, stat_nom=getattr(skill_b_org, 'stat_nom', ''))
 
         # Lancer
         # Lancer
@@ -3980,19 +4065,48 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
             # Contre-Temps (École de l'Estoc P2) : +1 Tension si round gagné
             if "passif_estoc_contretemps" in p_defenseur.competences:
                 p_defenseur.tension = min(p_defenseur.tension + 1, 20)
-                resultat_txt += " ⚡+1T" 
+                resultat_txt += " ⚡+1T"
         else:
-            resultat_txt = "⚖️ **Égalité !**"
-            color_embed = 0x95a5a6 
+            # Égalité de dés : tranchée par une pièce pondérée selon l'écart de stat
+            # brute au-dessus d'un socle (jamais garanti), au lieu de l'ancien bonus de
+            # stat ajouté systématiquement à chaque round — voir clash_proba_egalite.
+            tranche = "(pile ou face)" if proba_egalite_a == 0.5 else None
+            if random.random() < proba_egalite_a:
+                coins_b -= 1
+                detail = tranche or f"({skill_a_org.stat_nom} plus haute)"
+                resultat_txt = f"⚖️➡️ **{p_attaquant.nom}** l'emporte sur l'égalité {detail} !"
+                color_embed = 0xe74c3c
+                if "passif_estoc_contretemps" in p_attaquant.competences:
+                    p_attaquant.tension = min(p_attaquant.tension + 1, 20)
+                    resultat_txt += " ⚡+1T"
+            else:
+                coins_a -= 1
+                detail = tranche or f"({skill_b_org.stat_nom} plus haute)"
+                resultat_txt = f"⚖️➡️ **{p_defenseur.nom}** l'emporte sur l'égalité {detail} !"
+                color_embed = 0x2ecc71
+                if "passif_estoc_contretemps" in p_defenseur.competences:
+                    p_defenseur.tension = min(p_defenseur.tension + 1, 20)
+                    resultat_txt += " ⚡+1T"
 
         vis_a_str = ' '.join(vis_a) if vis_a else "⚪"
         vis_b_str = ' '.join(vis_b) if vis_b else "⚪"
 
+        # Chances de victoire mises à jour depuis l'état actuel des pièces (estimation,
+        # ne tient pas compte des passifs ponctuels type Moine/Légion/Drakéide ci-dessus).
+        if coins_a > 0 and coins_b > 0:
+            pct_a_round = clash_estimer_victoire(
+                coins_a, coins_b, skill_a_org.base, skill_a_org.bonus, skill_b_org.base, skill_b_org.bonus,
+                bonus_lvl_a, bonus_lvl_b, proba_egalite_a,
+            )
+        else:
+            pct_a_round = 100.0 if coins_b <= 0 else 0.0
+        footer_txt = f"{resultat_txt}\n📊 Chances de victoire : {p_attaquant.nom} {pct_a_round:.0f}% / {p_defenseur.nom} {100 - pct_a_round:.0f}%"
+
         embed_round = discord.Embed(title=f"🔄 Round {tour_clash}", color=color_embed)
         embed_round.add_field(name=f"🔴 {p_attaquant.nom}", value=f"**{tot_a}** `{vis_a_str}`", inline=True)
         embed_round.add_field(name=f"🔵 {p_defenseur.nom}", value=f"**{tot_b}** `{vis_b_str}`", inline=True)
-        embed_round.set_footer(text=resultat_txt)
-        
+        embed_round.set_footer(text=footer_txt)
+
         try: await interaction.followup.send(embed=embed_round)
         except discord.HTTPException: pass
         tour_clash += 1
