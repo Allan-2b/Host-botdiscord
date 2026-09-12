@@ -588,18 +588,18 @@ def populate_spells():
         
         # ==================== GUERRIER - TRONC COMMUN ====================
         # PALLIER 1
-        ("frappe_lourde_novice", "Frappe Lourde Novice", '["guerrier"]', 1, 0, 4, 3, 2, "phy", 0, "tension", 0, 0, "Un coup d'arme basique et efficace.", "actif", "tronc", '{"generate_tension": 1}'),
+        ("frappe_lourde_novice", "Frappe Lourde Novice", '["guerrier"]', 1, 0, 4, 3, 2, "phy", 0, "tension", 0, 0, "Un coup d'arme basique et efficace.", "actif", "tronc", '{"generate_tension": 2}'),
         ("schnitt_novice", "Schnitt Novice", '["guerrier"]', 1, 1, 4, 4, 1, "phy", 1, "tension", 0, 2, "Une entaille vicieuse visant une zone non protégée.", "actif", "tronc", '{"seuil": 1, "status": {"hemorragie": 2}}'),
         ("fegen_novice", "Fegen Novice", '["guerrier"]', 1, 1, 3, 4, 3, "phy", 1, "tension", 0, 2, "Un balayage bas visant les jambes pour faire chuter.", "actif", "tronc", '{"seuil": 2, "status": {"root": 1}}'),
         ("zorn_novice", "Zorn Novice", '["guerrier"]', 1, 1, 5, 4, 4, "phy", 1, "tension", 0, 2, "Une frappe alimentée par la colère.", "actif", "tronc", '{"self_damage": 5}'),
-        ("hieb", "Hieb", '["guerrier"]', 1, 1, 5, 4, 1, "phy", 0, "tension", 0, 2, "Un coup d'arme brutal, parfait pour tester la garde adverse.", "actif", "tronc", '{"seuil": 1, "generate_tension": 1}'),
+        ("hieb", "Hieb", '["guerrier"]', 1, 1, 5, 4, 1, "phy", 0, "tension", 0, 2, "Un coup d'arme brutal, parfait pour tester la garde adverse.", "actif", "tronc", '{"seuil": 1, "generate_tension": 2}'),
         ("stoss", "Stoss", '["guerrier"]', 1, 1, 6, 4, 2, "phy", 1, "tension", 0, 2, "Une frappe d'estoc directe et ultra-rapide conçue pour percer.", "actif", "tronc", '{"guaranteed_dmg": 5}'),
         ("atem", "Atem (Bonus)", '["guerrier"]', 1, 1, 0, 1, 0, "phy", 1, "tension", 0, 2, "Une technique de respiration pour ignorer la douleur.", "defense", "tronc", '{"seuil": 1, "reduce_dmg_flat": 4}'),
         ("instinkt", "Instinkt (Bonus)", '["guerrier"]', 1, 1, 0, 3, 0, "phy", 1, "tension", 0, 2, "Les sens s'aiguisent pour repérer le danger immédiat.", "utilitaire", "tronc", '{"seuil": 1, "rp_effect": "Détecte embuscade, piège ou ennemi caché."}'),
         ("blick", "Blick (Bonus)", '["guerrier"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 2, "Un simple regard noir.", "utilitaire", "tronc", '{"seuil": 1, "rp_effect": "Force un PNJ civil ou lâche à révéler une information sans avoir besoin de le frapper."}'),
 
         # PALLIER 2
-        ("frappe_lourde", "Frappe Lourde Évoluée", '["guerrier"]', 2, 2, 6, 5, 3, "phy", 0, "tension", 0, 0, "Le coup de base du guerrier, affiné par l'expérience.", "actif", "tronc", '{"generate_tension": 1}'),
+        ("frappe_lourde", "Frappe Lourde Évoluée", '["guerrier"]', 2, 2, 6, 5, 3, "phy", 0, "tension", 0, 0, "Le coup de base du guerrier, affiné par l'expérience.", "actif", "tronc", '{"generate_tension": 2}'),
         ("ansturm", "Ansturm", '["guerrier"]', 2, 2, 7, 5, 2, "phy", 2, "tension", 0, 2, "Une charge où le guerrier se jette pour renverser l'ennemi.", "actif", "tronc", '{"seuil": 2, "status": {"stun": 1}}'),
         ("spalten", "Spalten", '["guerrier"]', 2, 2, 8, 4, 4, "phy", 2, "tension", 0, 3, "Un coup vertical dévastateur conçu pour fendre les boucliers et les armures.", "actif", "tronc", '{"guaranteed_dmg": 5, "status": {"hemorragie": 1}}'),
         ("wille", "Wille (Bonus)", '["guerrier"]', 2, 2, 0, 2, 0, "phy", 1, "tension", 0, 2, "Un effort mental pour rejeter une affliction.", "utilitaire", "tronc", '{"seuil": 1, "cleanse_self": true}'),
@@ -617,7 +617,7 @@ def populate_spells():
         ("tragen", "Tragen (Bonus)", '["guerrier"]', 3, 3, 0, 1, 0, "phy", 1, "tension", 0, 2, "Déploie une force herculéenne momentanée.", "utilitaire", "tronc", '{"seuil": 1, "rp_effect": "Permet de soulever une charge impossible comme un rocher ou une herse."}'),
 
         # PALLIER 4
-        ("frappe_lourde_avancee", "Frappe Lourde Avancée", '["guerrier"]', 4, 4, 8, 7, 4, "phy", 0, "tension", 0, 0, "La quintessence de la maîtrise martiale, alliant poids et précision.", "actif", "tronc", '{"generate_tension": 1}'),
+        ("frappe_lourde_avancee", "Frappe Lourde Avancée", '["guerrier"]', 4, 4, 8, 7, 4, "phy", 0, "tension", 0, 0, "La quintessence de la maîtrise martiale, alliant poids et précision.", "actif", "tronc", '{"generate_tension": 2}'),
         ("hinrichten", "Hinrichten", '["guerrier"]', 4, 4, 12, 7, 5, "phy", 3, "tension", 0, 3, "Le coup de grâce, réservé aux ennemis brisés.", "actif", "tronc", '{"seuil": 4, "execute_percent": 25}'),
         ("erdbeben", "Erdbeben", '["guerrier"]', 4, 4, 10, 7, 4, "phy", 3, "tension", 0, 3, "Frappe le sol avec une telle puissance que la terre se fracture.", "actif", "tronc", '{"seuil": 3, "aoe": true, "terrain_destruct": true}'),
         ("eiserner_wille", "Eiserner Wille (Bonus)", '["guerrier"]', 4, 4, 0, 2, 0, "phy", 2, "tension", 0, 4, "Une détermination d'acier qui repousse les intrusions mentales.", "utilitaire", "tronc", '{"seuil": 1, "cleanse_self": true, "rp_effect": "Purge instantanément tous les contrôles (Étourdissement, Enracinement, Sommeil, Gel) sur soi-même."}'),
@@ -5108,8 +5108,8 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
         pv_avant_v4 = p.pv_actuel
         p.pv_actuel -= degats_finaux
         if p.classe == "guerrier":
-            p.tension += 1
-            msg_gain = "\n💢 **+1 Tension** (Douleur)"
+            p.tension += 2
+            msg_gain = "\n💢 **+2 Tension** (Douleur)"
 
         # --- SERMENT DU SANG (Clan du Nord) : calcul bonus ---
         if "clan_nord" in p.sous_classes_unlocked and p.serment_actif:
