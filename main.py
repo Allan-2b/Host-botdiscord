@@ -4123,14 +4123,6 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
 
         damage_final, vis_fin, heads_final = final_skill.roll(bonus_niveau=bonus_v)
 
-        # --- Drakéide : +3 dégâts finaux par palier de 3 niveaux (uniquement sur les dégâts, pas dans le clash) ---
-        if vainqueur.race == "Drakéide" and vainqueur.niveau >= 3:
-            bonus_drake = (vainqueur.niveau // 3) * 3
-            damage_final += bonus_drake
-            vis_fin.append(f"🐲+{bonus_drake}(Drakéide)")
-
-
-
         ref_vainqueur = None
         for k, v in SKILLS_DB.items():
             if v['nom'] == skill_vainqueur.nom:
@@ -4167,27 +4159,14 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
                     bonus_txt += "\n⚫ **Masse Initiale** : +1 Lestage bonus (cible portait ≥ 3 Lestages) !"
 
         # --- BONUS RACIAUX & EFFETS ---
-        if vainqueur.race == "Drakéide":
-            drake_bonus = vainqueur.niveau // 3
-            if drake_bonus > 0:
-                damage_final += drake_bonus
-                bonus_txt += f" 🐲+{drake_bonus}(Drakéide)"
+        # Drakéide : uniquement ici (dégâts finaux), pas dans les rounds du clash.
+        # Moine du Lotus / Légion de Fer : déjà appliqués round par round dans la boucle
+        # du clash ci-dessus, ne pas les ré-appliquer ici (double comptage sinon).
+        if vainqueur.race == "Drakéide" and vainqueur.niveau >= 3:
+            drake_bonus = (vainqueur.niveau // 3) * 3
+            damage_final += drake_bonus
+            bonus_txt += f" 🐲+{drake_bonus}(Drakéide)"
 
-        # --- MOINE DU LOTUS : +4 Base si Perturbé | +2 Base si Éveil P5 ---
-        if "moine_lotus" in vainqueur.sous_classes_unlocked:
-            if "passif_lotus_eveil" in vainqueur.competences:
-                damage_final += 2
-                bonus_txt += " +2(Éveil)"
-            elif not vainqueur.concentre:
-                damage_final += 4
-                bonus_txt += " 🔥+4(Perturbé)"
-
-        # --- LÉGION DE FER : -3 Base en Posture (-1 si Implacable P4) ---
-        if "legion_fer" in vainqueur.sous_classes_unlocked and vainqueur.posture_active:
-            malus_p = 1 if "passif_legion_implacable" in vainqueur.competences else 3
-            damage_final -= malus_p
-            bonus_txt += f" 🛡️(-{malus_p} Posture)"
-        
         if hasattr(vainqueur, "vampire_boost") and vainqueur.vampire_boost > 0:
             damage_final += vainqueur.vampire_boost
             bonus_txt += f" + {vainqueur.vampire_boost} (Sang)"
