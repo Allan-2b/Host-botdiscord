@@ -6460,6 +6460,107 @@ async def creation(interaction: discord.Interaction, nom: str, classe: app_comma
         await interaction.response.send_message(f"Erreur: {e}", ephemeral=True)
 
 
+INCARNER_CLASSE_ALIASES = {
+    "guerrier": "Guerrier",
+    "mage": "Mage",
+    "pretre": "Pretre", "prêtre": "Pretre",
+}
+INCARNER_RACE_ALIASES = {
+    "humain": "Humain",
+    "elfe": "Elfe",
+    "nain": "Nain",
+    "drakeide": "Drakéide", "drakéide": "Drakéide",
+    "feral": "Féral", "féral": "Féral",
+    "celeste": "Céleste", "céleste": "Céleste",
+    "vampire": "Vampire",
+}
+INCARNER_MAX_PERSOS = 10
+
+
+@bot.tree.command(name="incarner", description="Créer plusieurs personnages en une seule commande")
+@app_commands.describe(personnages="Format: Nom:Classe:Race, Nom2:Classe2:Race2, ... (max 10) — Classe: Guerrier/Mage/Pretre — Race: Humain/Elfe/Nain/Drakéide/Féral/Céleste/Vampire")
+async def incarner(interaction: discord.Interaction, personnages: str):
+    user_id = interaction.user.id
+    entrees = [e.strip() for e in personnages.split(",") if e.strip()]
+    if not entrees:
+        return await interaction.response.send_message("❌ Aucun personnage à créer.", ephemeral=True)
+    if len(entrees) > INCARNER_MAX_PERSOS:
+        return await interaction.response.send_message(f"❌ Maximum {INCARNER_MAX_PERSOS} personnages par commande.", ephemeral=True)
+
+    await interaction.response.defer()
+
+    conn = get_db_connection()
+    noms_existants = {row["nom"] for row in conn.execute("SELECT nom FROM joueurs WHERE user_id = ?", (user_id,)).fetchall()}
+    conn.close()
+
+    reussites = []
+    echecs = []
+    dernier_perso_cree = None
+
+    for entree in entrees:
+        parts = [p.strip() for p in entree.split(":")]
+        if len(parts) != 3:
+            echecs.append(f"`{entree}` — Format invalide (attendu Nom:Classe:Race)")
+            continue
+        nom, classe_brute, race_brute = parts
+        if not nom:
+            echecs.append(f"`{entree}` — Nom manquant")
+            continue
+
+        classe_val = INCARNER_CLASSE_ALIASES.get(classe_brute.lower())
+        if not classe_val:
+            echecs.append(f"**{nom}** — Classe inconnue : `{classe_brute}` (Guerrier/Mage/Pretre)")
+            continue
+
+        race_val = INCARNER_RACE_ALIASES.get(race_brute.lower())
+        if not race_val:
+            echecs.append(f"**{nom}** — Race inconnue : `{race_brute}` (Humain/Elfe/Nain/Drakéide/Féral/Céleste/Vampire)")
+            continue
+
+        if race_val == "Vampire" and classe_val == "Pretre":
+            echecs.append(f"**{nom}** — 🧛🚫 Vampire incompatible avec Prêtre")
+            continue
+
+        if nom in noms_existants:
+            echecs.append(f"**{nom}** — Nom déjà pris")
+            continue
+
+        try:
+            p = Personnage(user_id, nom, classe_val, race=race_val)
+            skill_base = ""
+            if p.classe == "guerrier": skill_base = "frappe_lourde_novice"
+            elif p.classe == "mage": skill_base = "zooltrak_novice"
+            else: skill_base = "lumiere_divine"
+            if skill_base not in SKILLS_DB:
+                skill_base = resolve_sort_ref(skill_base)
+            if skill_base in SKILLS_DB:
+                p.competences.append(skill_base)
+                p.sauvegarder()
+
+            noms_existants.add(nom)
+            dernier_perso_cree = nom
+            classe_affichage = "Prêtre" if classe_val == "Pretre" else classe_val
+            reussites.append(f"✅ **{nom}** — {race_val} {classe_affichage}")
+        except Exception as e:
+            echecs.append(f"**{nom}** — Erreur : {e}")
+
+    if dernier_perso_cree:
+        conn2 = get_db_connection()
+        conn2.execute("INSERT OR REPLACE INTO sessions VALUES (?, ?)", (user_id, dernier_perso_cree))
+        conn2.commit()
+        conn2.close()
+
+    embed = discord.Embed(title="✨ Création multiple de personnages", color=0x2ecc71 if reussites else 0xe74c3c)
+    if reussites:
+        embed.add_field(name=f"Créés ({len(reussites)})", value="\n".join(reussites)[:1024], inline=False)
+    if echecs:
+        embed.add_field(name=f"Échecs ({len(echecs)})", value="\n".join(echecs)[:1024], inline=False)
+    if dernier_perso_cree:
+        embed.set_footer(text=f"Personnage actif : {dernier_perso_cree} — /changer_perso pour basculer entre vos personnages.")
+
+    await interaction.followup.send(embed=embed)
+
+
 
 
 @bot.tree.command(name="fin_combat", description="Reset Tension, Ferveur")
@@ -6854,6 +6955,7 @@ async def help(interaction: discord.Interaction):
     # 1. BASES & EQUIPEMENT
     txt_bases = (
         "`/creation` : Créer votre personnage (7 Races dispos)\n"
+        "`/incarner` : Créer plusieurs personnages d'un coup (Nom:Classe:Race, ...)\n"
         "`/fiche` : Voir votre fiche complète (Stats & RP)\n"
         "`/inventaire` : Voir votre sac et équipement\n"
         "`/equiper [ID]` / `/desequiper [ID]` : Gérer vos objets\n"
