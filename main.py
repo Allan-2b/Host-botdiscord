@@ -255,6 +255,29 @@ def init_db():
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN gm_mana_max_bonus_item INTEGER DEFAULT 0")
     except: pass
 
+    # inventaire : rattacher chaque objet à une fiche précise (au lieu du user_id seul,
+    # qui faisait partager les objets/l'équipement entre toutes les fiches d'un joueur)
+    try: conn.execute("ALTER TABLE inventaire ADD COLUMN nom_perso TEXT")
+    except: pass
+    # Backfill : rattache les objets déjà en base à la fiche actuellement active du joueur
+    try:
+        conn.execute('''
+            UPDATE inventaire SET nom_perso = (
+                SELECT nom_perso_actif FROM sessions WHERE sessions.user_id = inventaire.user_id
+            ) WHERE nom_perso IS NULL AND EXISTS (
+                SELECT 1 FROM sessions WHERE sessions.user_id = inventaire.user_id
+            )
+        ''')
+        # Joueurs sans session active mais une seule fiche : rattache directement à celle-ci
+        conn.execute('''
+            UPDATE inventaire SET nom_perso = (
+                SELECT nom FROM joueurs WHERE joueurs.user_id = inventaire.user_id
+            ) WHERE nom_perso IS NULL AND (
+                SELECT COUNT(*) FROM joueurs WHERE joueurs.user_id = inventaire.user_id
+            ) = 1
+        ''')
+    except: pass
+
     conn.commit()
     conn.close()
 
@@ -1535,8 +1558,8 @@ class Personnage:
             SELECT c.nom, c.slot, c.description, c.bonus_json, i.item_ref, i.identifie
             FROM inventaire i
             JOIN config_items c ON i.item_ref = c.ref
-            WHERE i.user_id = ? AND i.equipe = 1
-        ''', (self.user_id,)).fetchall()
+            WHERE i.user_id = ? AND i.nom_perso = ? AND i.equipe = 1
+        ''', (self.user_id, self.nom)).fetchall()
         self.equipement = [dict(row) for row in rows]
 
         # Stats qui peuvent venir d'items — on mémorise la valeur actuelle (depuis DB)
@@ -6693,6 +6716,39 @@ async def changer_perso(interaction: discord.Interaction, nom: str):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
+@bot.tree.command(name="incarner", description="Mettre un de vos personnages en fiche courante")
+@app_commands.describe(nom="Le personnage que vous voulez incarner")
+@app_commands.autocomplete(nom=my_perso_autocomplete)
+async def incarner(interaction: discord.Interaction, nom: str):
+    user_id = interaction.user.id
+    conn = get_db_connection()
+
+    existe = conn.execute("SELECT nom, classe, niveau FROM joueurs WHERE user_id = ? AND nom = ?", (user_id, nom)).fetchone()
+    if not existe:
+        conn.close()
+        return await interaction.response.send_message(
+            f"❌ Aucun personnage nommé **{nom}** trouvé. Utilisez `/mes_persos` pour voir vos personnages.",
+            ephemeral=True
+        )
+
+    conn.execute("INSERT OR REPLACE INTO sessions VALUES (?, ?)", (user_id, nom))
+    conn.commit()
+    conn.close()
+
+    p = Personnage.charger(user_id)
+    embed = discord.Embed(
+        title="🎭 Personnage Incarné",
+        description=f"Vous incarnez maintenant **{p.nom}** — Niveau {p.niveau} {p.classe.capitalize()} ({p.race}).",
+        color=0x9b59b6
+    )
+    embed.add_field(name="État", value=f"❤️ {p.pv_actuel}/{p.pv_max} PV", inline=True)
+    if p.classe == "mage":
+        embed.add_field(name="Mana", value=f"💙 {p.mana}/{p.mana_max}", inline=True)
+    elif p.classe == "guerrier":
+        embed.add_field(name="Tension", value=f"💢 {p.tension}", inline=True)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 @bot.tree.command(name="delete_perso", description="⚠️ Supprimer DÉFINITIVEMENT un personnage")
 @app_commands.describe(nom="Nom du personnage à supprimer")
 @app_commands.autocomplete(nom=my_perso_autocomplete)
@@ -6859,7 +6915,8 @@ async def help(interaction: discord.Interaction):
         "`/equiper [ID]` / `/desequiper [ID]` : Gérer vos objets\n"
         "`/repos` : Récupération totale (PV, Mana)\n"
         "`/personnalisation` : Modifier image/description/alias\n"
-        "`/mes_persos` : Changer de personnage actif\n"
+        "`/mes_persos` : Voir la liste de vos personnages\n"
+        "`/incarner` : Mettre un de vos personnages en fiche courante\n"
         "`/set_stat` : Modifier manuellement vos stats (Passifs)"
     )
     embed.add_field(name="🎒 Bases & Gestion", value=txt_bases, inline=False)
@@ -6965,6 +7022,8 @@ def format_bonus_json(bonus_json_str: str) -> str:
 async def inventaire(interaction: discord.Interaction):
     user_id = interaction.user.id
     p = Personnage.charger(user_id)
+    if not p:
+        return await interaction.response.send_message("❌ Pas de fiche active. Utilisez **/creation**.", ephemeral=True)
     conn = get_db_connection()
 
     items = conn.execute('''
@@ -6972,9 +7031,9 @@ async def inventaire(interaction: discord.Interaction):
                c.nom, c.slot, c.description, c.rarete, c.points_limite, c.necessite_etude, c.bonus_json
         FROM inventaire i
         JOIN config_items c ON i.item_ref = c.ref
-        WHERE i.user_id = ?
+        WHERE i.user_id = ? AND i.nom_perso = ?
         ORDER BY i.equipe DESC, c.slot
-    ''', (user_id,)).fetchall()
+    ''', (user_id, p.nom)).fetchall()
     conn.close()
 
     if not items:
@@ -7034,12 +7093,12 @@ async def equiper(interaction: discord.Interaction, item_id: int):
                c.nom, c.slot, c.description, c.rarete, c.bonus_json, c.points_limite, c.necessite_etude
         FROM inventaire i
         JOIN config_items c ON i.item_ref = c.ref
-        WHERE i.id = ? AND i.user_id = ?
-    ''', (item_id, user_id)).fetchone()
+        WHERE i.id = ? AND i.user_id = ? AND i.nom_perso = ?
+    ''', (item_id, user_id, p.nom)).fetchone()
 
     if not target:
         conn.close()
-        return await interaction.response.send_message("❌ Objet introuvable dans votre inventaire.", ephemeral=True)
+        return await interaction.response.send_message("❌ Objet introuvable dans l'inventaire de cette fiche.", ephemeral=True)
 
     if target['equipe'] == 1:
         conn.close()
@@ -7060,8 +7119,8 @@ async def equiper(interaction: discord.Interaction, item_id: int):
     equipes = conn.execute('''
         SELECT c.points_limite, c.rarete
         FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
-        WHERE i.user_id = ? AND i.equipe = 1
-    ''', (user_id,)).fetchall()
+        WHERE i.user_id = ? AND i.nom_perso = ? AND i.equipe = 1
+    ''', (user_id, p.nom)).fetchall()
     pts_utilises = sum(row['points_limite'] or RARETE_POINTS.get(row['rarete'], 5) for row in equipes)
 
     if pts_utilises + pts_item > pts_max:
@@ -7079,8 +7138,8 @@ async def equiper(interaction: discord.Interaction, item_id: int):
 
     items_equipes_slot = conn.execute('''
         SELECT i.id FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
-        WHERE i.user_id = ? AND i.equipe = 1 AND c.slot = ?
-    ''', (user_id, slot_vise)).fetchall()
+        WHERE i.user_id = ? AND i.nom_perso = ? AND i.equipe = 1 AND c.slot = ?
+    ''', (user_id, p.nom, slot_vise)).fetchall()
 
     msg_retrait = ""
     if len(items_equipes_slot) >= limit:
@@ -7090,8 +7149,8 @@ async def equiper(interaction: discord.Interaction, item_id: int):
         else:
             conn.execute('''
                 UPDATE inventaire SET equipe = 0
-                WHERE user_id = ? AND equipe = 1 AND item_ref IN (SELECT ref FROM config_items WHERE slot = ?)
-            ''', (user_id, slot_vise))
+                WHERE user_id = ? AND nom_perso = ? AND equipe = 1 AND item_ref IN (SELECT ref FROM config_items WHERE slot = ?)
+            ''', (user_id, p.nom, slot_vise))
             msg_retrait = "\n*(Ancien objet déséquipé automatiquement)*"
 
     conn.execute("UPDATE inventaire SET equipe = 1 WHERE id = ?", (item_id,))
@@ -7111,9 +7170,12 @@ async def equiper(interaction: discord.Interaction, item_id: int):
 @app_commands.describe(item_id="Le numéro ID visible dans /inventaire")
 async def desequiper(interaction: discord.Interaction, item_id: int):
     user_id = interaction.user.id
+    p = Personnage.charger(user_id)
+    if not p:
+        return await interaction.response.send_message("❌ Pas de fiche active.", ephemeral=True)
     conn = get_db_connection()
-    
-    check = conn.execute("SELECT equipe, item_ref FROM inventaire WHERE id = ? AND user_id = ?", (item_id, user_id)).fetchone()
+
+    check = conn.execute("SELECT equipe, item_ref FROM inventaire WHERE id = ? AND user_id = ? AND nom_perso = ?", (item_id, user_id, p.nom)).fetchone()
     
     if not check:
         conn.close()
@@ -7143,9 +7205,9 @@ async def equipement(interaction: discord.Interaction):
         SELECT i.id, c.ref, c.nom, c.slot, c.description, i.equipe, i.identifie, c.necessite_etude
         FROM inventaire i
         JOIN config_items c ON i.item_ref = c.ref
-        WHERE i.user_id = ?
+        WHERE i.user_id = ? AND i.nom_perso = ?
         ORDER BY c.slot, i.equipe DESC
-    """, (user_id,)).fetchall()
+    """, (user_id, p.nom)).fetchall()
     conn.close()
 
     SLOTS = [
@@ -7244,8 +7306,8 @@ async def equipement(interaction: discord.Interaction):
             target = conn2.execute("""
                 SELECT i.item_ref, c.slot, c.nom, c.description, i.equipe
                 FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
-                WHERE i.id = ? AND i.user_id = ?
-            """, (item_id, interaction.user.id)).fetchone()
+                WHERE i.id = ? AND i.user_id = ? AND i.nom_perso = ?
+            """, (item_id, interaction.user.id, p.nom)).fetchone()
 
             if not target:
                 conn2.close()
@@ -7256,8 +7318,8 @@ async def equipement(interaction: discord.Interaction):
             count = conn2.execute("""
                 SELECT COUNT(*) FROM inventaire i
                 JOIN config_items c ON i.item_ref = c.ref
-                WHERE i.user_id = ? AND i.equipe = 1 AND c.slot = ?
-            """, (interaction.user.id, slot_vise)).fetchone()[0]
+                WHERE i.user_id = ? AND i.nom_perso = ? AND i.equipe = 1 AND c.slot = ?
+            """, (interaction.user.id, p.nom, slot_vise)).fetchone()[0]
 
             if count >= limit:
                 if slot_vise == "anneau":
@@ -7266,9 +7328,9 @@ async def equipement(interaction: discord.Interaction):
                 else:
                     conn2.execute("""
                         UPDATE inventaire SET equipe = 0
-                        WHERE user_id = ? AND equipe = 1
+                        WHERE user_id = ? AND nom_perso = ? AND equipe = 1
                         AND item_ref IN (SELECT ref FROM config_items WHERE slot = ?)
-                    """, (interaction.user.id, slot_vise))
+                    """, (interaction.user.id, p.nom, slot_vise))
 
             conn2.execute("UPDATE inventaire SET equipe = 1 WHERE id = ?", (item_id,))
             conn2.commit()
@@ -7284,8 +7346,8 @@ async def equipement(interaction: discord.Interaction):
             conn2 = get_db_connection()
             target = conn2.execute("""
                 SELECT c.nom FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
-                WHERE i.id = ? AND i.user_id = ?
-            """, (item_id, interaction.user.id)).fetchone()
+                WHERE i.id = ? AND i.user_id = ? AND i.nom_perso = ?
+            """, (item_id, interaction.user.id, p.nom)).fetchone()
             if not target:
                 conn2.close()
                 return await interaction.response.send_message("❌ Objet introuvable.", ephemeral=True)
@@ -8903,17 +8965,20 @@ async def gm_ajouter_set_item(interaction: discord.Interaction, set_ref: str, it
 @bot.tree.command(name="sets", description="Voir les sets liés aux items que vous possédez")
 async def sets(interaction: discord.Interaction):
     user_id = interaction.user.id
+    p = Personnage.charger(user_id)
+    if not p:
+        return await interaction.response.send_message("❌ Pas de fiche active.", ephemeral=True)
     conn = get_db_connection()
 
     # Tous les items en possession (équipés ou non, identifiés ou non)
     possedes = conn.execute(
-        "SELECT item_ref FROM inventaire WHERE user_id=?", (user_id,)
+        "SELECT item_ref FROM inventaire WHERE user_id=? AND nom_perso=?", (user_id, p.nom)
     ).fetchall()
     refs_possedes = {r['item_ref'] for r in possedes}
 
     # Items équipés et identifiés (pour savoir lesquels activent les bonus)
     equipes = conn.execute(
-        "SELECT item_ref FROM inventaire WHERE user_id=? AND equipe=1 AND identifie=1", (user_id,)
+        "SELECT item_ref FROM inventaire WHERE user_id=? AND nom_perso=? AND equipe=1 AND identifie=1", (user_id, p.nom)
     ).fetchall()
     refs_equipes = {r['item_ref'] for r in equipes}
 
@@ -8948,10 +9013,35 @@ async def sets(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="gm_give_item", description="(GM) Donner un objet à un joueur")
-@app_commands.autocomplete(item_ref=item_autocomplete)
-async def gm_give_item(interaction: discord.Interaction, joueur: discord.Member, item_ref: str):
+@app_commands.describe(
+    joueur="[Optionnel] Le joueur (utilise sa fiche ACTIVE si une seule, sinon précisez cible_fiche)",
+    cible_fiche="[Optionnel] Cible une fiche précise par nom, même non active — prioritaire sur 'joueur'"
+)
+@app_commands.autocomplete(item_ref=item_autocomplete, cible_fiche=cible_fiche_autocomplete)
+async def gm_give_item(interaction: discord.Interaction, item_ref: str, joueur: discord.Member = None, cible_fiche: str = None):
     if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
+
+    if cible_fiche:
+        p_cible = parse_cible_arg(cible_fiche)
+        if not p_cible:
+            return await interaction.response.send_message("❌ Fiche introuvable.", ephemeral=True)
+    elif joueur:
+        conn0 = get_db_connection()
+        fiches = conn0.execute("SELECT nom FROM joueurs WHERE user_id = ?", (joueur.id,)).fetchall()
+        conn0.close()
+        if not fiches:
+            return await interaction.response.send_message("❌ Ce joueur n'a aucune fiche.", ephemeral=True)
+        if len(fiches) > 1:
+            noms = ", ".join(f"**{f['nom']}**" for f in fiches)
+            return await interaction.response.send_message(
+                f"⚠️ {joueur.display_name} a plusieurs fiches ({noms}). "
+                f"Précisez `cible_fiche` pour choisir laquelle reçoit l'objet.",
+                ephemeral=True
+            )
+        p_cible = Personnage.charger_par_nom(joueur.id, fiches[0]['nom'])
+    else:
+        return await interaction.response.send_message("❌ Précisez `joueur` ou `cible_fiche`.", ephemeral=True)
 
     conn = get_db_connection()
     item = conn.execute("SELECT nom, necessite_etude FROM config_items WHERE ref=?", (item_ref,)).fetchone()
@@ -8961,13 +9051,13 @@ async def gm_give_item(interaction: discord.Interaction, joueur: discord.Member,
 
     # Si étude requise : identifie=0, sinon 1
     identifie = 0 if item['necessite_etude'] else 1
-    conn.execute("INSERT INTO inventaire (user_id, item_ref, identifie) VALUES (?,?,?)",
-                 (joueur.id, item_ref, identifie))
+    conn.execute("INSERT INTO inventaire (user_id, item_ref, identifie, nom_perso) VALUES (?,?,?,?)",
+                 (p_cible.user_id, item_ref, identifie, p_cible.nom))
     conn.commit(); conn.close()
 
     suffix = "\n⚠️ *Cet objet doit être **étudié** (`/etudier`) avant de fonctionner.*" if not identifie else ""
     await interaction.response.send_message(
-        f"🎁 **{item['nom']}** ajouté à l'inventaire de {joueur.display_name}.{suffix}"
+        f"🎁 **{item['nom']}** ajouté à l'inventaire de **{p_cible.nom}**.{suffix}"
     )
 
 
@@ -8978,13 +9068,16 @@ async def etudier(interaction: discord.Interaction, item_id: int):
     import random as _rnd
     import asyncio as _asyncio
     user_id = interaction.user.id
+    p = Personnage.charger(user_id)
+    if not p:
+        return await interaction.response.send_message("❌ Pas de fiche active.", ephemeral=True)
     conn = get_db_connection()
 
     inv = conn.execute('''
         SELECT i.id, i.identifie, i.item_ref, c.nom, c.description, c.rarete, c.necessite_etude
         FROM inventaire i JOIN config_items c ON i.item_ref = c.ref
-        WHERE i.id=? AND i.user_id=?
-    ''', (item_id, user_id)).fetchone()
+        WHERE i.id=? AND i.user_id=? AND i.nom_perso=?
+    ''', (item_id, user_id, p.nom)).fetchone()
 
     if not inv:
         conn.close()
@@ -9244,18 +9337,40 @@ async def gm_give_spell(interaction: discord.Interaction, joueur: discord.Member
     await interaction.response.send_message(content=f"{joueur.mention}", embed=embed)
 
 @bot.tree.command(name="gm_retirer_item", description="(GM) Retirer définitivement un objet de l'inventaire d'un joueur")
-@app_commands.describe(joueur="Le joueur ciblé", item_ref="Le nom/code de l'objet")
-@app_commands.autocomplete(item_ref=item_autocomplete)
-async def gm_retirer_item(interaction: discord.Interaction, joueur: discord.Member, item_ref: str):
+@app_commands.describe(
+    joueur="Le joueur ciblé", item_ref="Le nom/code de l'objet",
+    cible_fiche="[Optionnel] Précisez la fiche si le joueur en a plusieurs — prioritaire sur 'joueur'"
+)
+@app_commands.autocomplete(item_ref=item_autocomplete, cible_fiche=cible_fiche_autocomplete)
+async def gm_retirer_item(interaction: discord.Interaction, joueur: discord.Member, item_ref: str, cible_fiche: str = None):
     # Sécurité GM
-    if not is_gm(interaction.user.id): 
+    if not is_gm(interaction.user.id):
         return await interaction.response.send_message("❌ Accès refusé.", ephemeral=True)
-        
+
+    if cible_fiche:
+        p_cible = parse_cible_arg(cible_fiche)
+        if not p_cible:
+            return await interaction.response.send_message("❌ Fiche introuvable.", ephemeral=True)
+    else:
+        conn0 = get_db_connection()
+        fiches = conn0.execute("SELECT nom FROM joueurs WHERE user_id = ?", (joueur.id,)).fetchall()
+        conn0.close()
+        if not fiches:
+            return await interaction.response.send_message("❌ Ce joueur n'a aucune fiche.", ephemeral=True)
+        if len(fiches) > 1:
+            noms = ", ".join(f"**{f['nom']}**" for f in fiches)
+            return await interaction.response.send_message(
+                f"⚠️ {joueur.display_name} a plusieurs fiches ({noms}). "
+                f"Précisez `cible_fiche` pour choisir laquelle.",
+                ephemeral=True
+            )
+        p_cible = Personnage.charger_par_nom(joueur.id, fiches[0]['nom'])
+
     conn = get_db_connection()
-    
+
     # 1. Vérifier si le joueur possède bien l'objet
     # On prend l'ID (LIMIT 1) pour n'en supprimer qu'un seul s'il en a plusieurs
-    check = conn.execute("SELECT id FROM inventaire WHERE user_id = ? AND item_ref = ? LIMIT 1", (joueur.id, item_ref)).fetchone()
+    check = conn.execute("SELECT id FROM inventaire WHERE user_id = ? AND nom_perso = ? AND item_ref = ? LIMIT 1", (p_cible.user_id, p_cible.nom, item_ref)).fetchone()
     
     if not check:
         conn.close()
@@ -9271,13 +9386,11 @@ async def gm_retirer_item(interaction: discord.Interaction, joueur: discord.Memb
     conn.close()
     
     # 4. Mettre à jour le personnage s'il le portait sur lui
-    p = Personnage.charger(joueur.id)
-    if p:
-        p.charger_equipement() # Recharge l'équipement sans l'objet supprimé
-        p.sauvegarder()
-        
+    p_cible.charger_equipement() # Recharge l'équipement sans l'objet supprimé
+    p_cible.sauvegarder()
+
     embed = discord.Embed(title="objet retiré", color=0xe74c3c)
-    embed.description = f"Le MJ a retiré **{nom_item}** de l'inventaire de {joueur.mention}."
+    embed.description = f"Le MJ a retiré **{nom_item}** de l'inventaire de **{p_cible.nom}** ({joueur.mention})."
     
     await interaction.response.send_message(embed=embed)
 
@@ -9757,8 +9870,8 @@ async def gm_restore(interaction: discord.Interaction):
         for inv in inventaire_data:
             try:
                 conn.execute(
-                    "INSERT OR REPLACE INTO inventaire (id, user_id, item_ref, equipe, identifie) VALUES (?,?,?,?,?)",
-                    (inv.get("id"), inv["user_id"], inv["item_ref"], inv.get("equipe", 0), inv.get("identifie", 1))
+                    "INSERT OR REPLACE INTO inventaire (id, user_id, item_ref, equipe, identifie, nom_perso) VALUES (?,?,?,?,?,?)",
+                    (inv.get("id"), inv["user_id"], inv["item_ref"], inv.get("equipe", 0), inv.get("identifie", 1), inv.get("nom_perso"))
                 )
                 nb_inventaire += 1
             except Exception as e:
