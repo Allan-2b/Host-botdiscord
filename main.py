@@ -147,6 +147,16 @@ def init_db():
             desc_bonus_4 TEXT DEFAULT ''
         )
     ''')
+    # config_sets existant créé avant l'ajout de ces colonnes (CREATE TABLE IF NOT EXISTS
+    # ne les ajoute pas rétroactivement) : on les rajoute explicitement si absentes.
+    for _col, _ddl in [
+        ("has_bonus_2", "ALTER TABLE config_sets ADD COLUMN has_bonus_2 INTEGER DEFAULT 0"),
+        ("has_bonus_4", "ALTER TABLE config_sets ADD COLUMN has_bonus_4 INTEGER DEFAULT 0"),
+        ("desc_bonus_2", "ALTER TABLE config_sets ADD COLUMN desc_bonus_2 TEXT DEFAULT ''"),
+        ("desc_bonus_4", "ALTER TABLE config_sets ADD COLUMN desc_bonus_4 TEXT DEFAULT ''"),
+    ]:
+        try: conn.execute(_ddl)
+        except: pass
     conn.execute('''
         CREATE TABLE IF NOT EXISTS config_set_items (
             set_ref TEXT,
