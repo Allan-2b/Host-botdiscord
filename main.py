@@ -7453,6 +7453,40 @@ def format_bonus_json(bonus_json_str: str) -> str:
     return ", ".join(parts)
 
 
+def ajouter_champ_decoupe(embed: discord.Embed, nom: str, texte: str, inline: bool = False, valeur_vide: str = "—"):
+    """Ajoute un ou plusieurs champs à un embed en respectant la limite Discord de
+    1024 caractères par valeur de champ (sinon HTTPException 50035). Découpe entre les
+    lignes pour ne jamais couper un objet en plein milieu."""
+    LIMITE = 1024
+    texte = texte or ""
+    if len(texte) <= LIMITE:
+        embed.add_field(name=nom, value=texte or valeur_vide, inline=inline)
+        return
+
+    chunks = []
+    current = ""
+    for ligne in texte.split("\n"):
+        # Sécurité : une seule ligne plus longue que la limite est tronquée directement
+        if len(ligne) > LIMITE:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(ligne[:LIMITE - 1] + "…")
+            continue
+        candidat = (current + "\n" + ligne) if current else ligne
+        if len(candidat) > LIMITE:
+            chunks.append(current)
+            current = ligne
+        else:
+            current = candidat
+    if current:
+        chunks.append(current)
+
+    for i, chunk in enumerate(chunks):
+        suffixe = "" if i == 0 else f" (suite {i + 1})"
+        embed.add_field(name=f"{nom}{suffixe}", value=chunk, inline=inline)
+
+
 @bot.tree.command(name="inventaire", description="Voir votre sac et équipement")
 async def inventaire(interaction: discord.Interaction):
     user_id = interaction.user.id
@@ -7505,8 +7539,8 @@ async def inventaire(interaction: discord.Interaction):
             txt_sac += ligne
 
     embed = discord.Embed(title="🎒 Inventaire", color=0xe67e22)
-    embed.add_field(name="⚔️ Équipement Porté", value=txt_equip or "Rien.", inline=False)
-    embed.add_field(name="🎒 Dans le sac", value=txt_sac or "Vide.", inline=False)
+    ajouter_champ_decoupe(embed, "⚔️ Équipement Porté", txt_equip, valeur_vide="Rien.")
+    ajouter_champ_decoupe(embed, "🎒 Dans le sac", txt_sac, valeur_vide="Vide.")
     if p:
         barre = "█" * int((pts_util/pts_max)*10) + "░" * (10-int((pts_util/pts_max)*10)) if pts_max else "░"*10
         embed.add_field(name="⚖️ Jauge de Limite", value=f"`{barre}` **{pts_util}/{pts_max}** pts (Niv.{p.niveau}×10)", inline=False)
@@ -7696,7 +7730,7 @@ async def equipement(interaction: discord.Interaction):
                 sac_txt += f"{ico_sac} **???** *(ID {it['id']})* — *Description cachée — `/etudier {it['id']}`*\n"
             else:
                 sac_txt += f"{ico_sac} **{it['nom']}** *(ID {it['id']})* — {it['description']}\n"
-        embed.add_field(name="🎒 Dans le sac", value=sac_txt, inline=False)
+        ajouter_champ_decoupe(embed, "🎒 Dans le sac", sac_txt)
     else:
         embed.add_field(name="🎒 Dans le sac", value="*Vide.*", inline=False)
 
