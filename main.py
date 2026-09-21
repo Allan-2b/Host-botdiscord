@@ -1162,7 +1162,7 @@ def populate_spells():
         ("ombres_marque_chasseur", "Marque du Chasseur (Préparation)", '["maitre_ombres"]', 3, 3, 0, 3, 0, "phy", 2, "tension", 0, 1, "Désigne une cible : votre prochaine Exécution contre elle est facilitée.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Usage unique en Phase de Chasse."}'),
         ("ombres_estocade_second_souffle", "Estocade du Second Souffle", '["maitre_ombres"]', 3, 3, 10, 4, 4, "phy", 2, "tension", 0, 2, "Dégâts physiques. +2 Base si la cible a subi Poison ce combat.", "actif", "spe", '{"bonus_si_poison": 2}'),
         ("ombres_nuage_toxique", "Nuage Toxique", '["maitre_ombres"]', 3, 3, 6, 4, 3, "phy", 2, "tension", 0, 3, "Dégâts physiques en zone. Poison si seuil atteint.", "actif", "spe", '{"seuil": 2, "status": {"poison": 2}, "aoe": true}'),
-        ("ombres_retrait_tactique", "Retrait Tactique (Bonus)", '["maitre_ombres"]', 3, 3, 0, 3, 0, "phy", 0, "tension", 0, 3, "Se replace hors de portée. En Traque : partage 1 Poison à un allié en Clash.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Se replace hors de portée immédiate sans quitter le combat."}'),
+        ("ombres_retrait_tactique", "Retrait Tactique (Bonus)", '["maitre_ombres"]', 3, 3, 0, 3, 0, "phy", 0, "tension", 0, 3, "Se replace hors de portée. Si la cible est empoisonnée : un allié qui l'attaque en Clash obtient +1 Pièce bonus.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Se replace hors de portée immédiate sans quitter le combat.", "bonus_pieces_allie_si_poison": 1}'),
         # P4
         ("ombres_embuscade_totale", "Embuscade Totale (Préparation, 1x/combat)", '["maitre_ombres"]', 4, 4, 0, 4, 0, "phy", 3, "tension", 0, 1, "Prochaine attaque via /attaque : Sneak Attack à +100%, peu importe la défense.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Usage unique en Phase de Chasse."}'),
         ("ombres_laceration_profonde", "Lacération Profonde", '["maitre_ombres"]', 4, 4, 12, 5, 5, "phy", 3, "tension", 0, 3, "Dégâts physiques. 3 Hémorragies si seuil atteint.", "actif", "spe", '{"seuil": 3, "status": {"hemorragie": 3}}'),
@@ -3167,6 +3167,10 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
     if data.get("bonus_si_poison") and defenseur and "poison" in defenseur.effets:
         degats_finaux += data["bonus_si_poison"]
         msg.append(f"☠️ **Poison actif** : +{data['bonus_si_poison']} Base.")
+    if data.get("bonus_pieces_allie_si_poison") and defenseur and "poison" in defenseur.effets:
+        valeur_bonus = data["bonus_pieces_allie_si_poison"]
+        defenseur.effets["_retrait_tactique_pieces"] = {"duree": 5, "valeur": valeur_bonus}
+        msg.append(f"☠️ **Faiblesse exploitable** : le prochain allié qui attaque {defenseur.nom} en Clash gagne +{valeur_bonus} Pièce bonus.")
 
     # ==========================================
     # --- MAGIE DE LA CHASSE : Familier & Pièges ---
@@ -4386,6 +4390,15 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
     if fp_b: del p_defenseur.effets["force_pile"]
 
     coins_a = skill_a_org.coins; coins_b = skill_b_org.coins
+
+    # --- MAÎTRE DES OMBRES : Retrait Tactique — bonus Pièces pour l'allié qui Clash la cible empoisonnée ---
+    _bonus_retrait_a = p_defenseur.effets.pop("_retrait_tactique_pieces", None)
+    if _bonus_retrait_a:
+        coins_a += _bonus_retrait_a.get("valeur", 1)
+    _bonus_retrait_b = p_attaquant.effets.pop("_retrait_tactique_pieces", None)
+    if _bonus_retrait_b:
+        coins_b += _bonus_retrait_b.get("valeur", 1)
+
     tour_clash = 1
     
     # Bonus niveau (Overwhelm)
