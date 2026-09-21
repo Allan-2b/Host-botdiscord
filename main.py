@@ -255,6 +255,24 @@ def init_db():
     try: conn.execute("ALTER TABLE joueurs ADD COLUMN gm_mana_max_bonus_item INTEGER DEFAULT 0")
     except: pass
 
+    # ── NOUVELLES COLONNES — Sous-classes Maître d'Arsenal / Moine du Poing Vide / Magie de la Chasse ──
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN elan_actuel INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN elan_max INTEGER DEFAULT 2")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN dernier_type_arme TEXT DEFAULT ''")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN souffle_phase INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN familier_pv INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN familier_pv_max INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN familier_actif INTEGER DEFAULT 0")
+    except: pass
+    try: conn.execute("ALTER TABLE joueurs ADD COLUMN pieges_poses TEXT DEFAULT '[]'")
+    except: pass
+
     # inventaire : rattacher chaque objet à une fiche précise (au lieu du user_id seul,
     # qui faisait partager les objets/l'équipement entre toutes les fiches d'un joueur)
     try: conn.execute("ALTER TABLE inventaire ADD COLUMN nom_perso TEXT")
@@ -1041,7 +1059,148 @@ def populate_spells():
         ("inq_jugement_final",    "Jugement Final",                '["inquisiteur"]', 5, 5, 20, 6, 7, "foi", 50, "ferveur", 6, 5, "Dégâts sacrés massifs. Condamnée <20% PV : Exécution.", "actif", "spe", '{"seuil": 4, "execute_percent_si_condamne": 20}'),        ("inq_contre_esp_total",  "Contre-Espionnage Total",       '["inquisiteur"]', 5, 5, 14, 5, 5, "foi", 35, "ferveur", 0, 3, "Zone : dissipe tous Furtifs/illusions. Tous révélés = Condamnés.", "actif", "spe", '{"seuil": 3, "cleanse_furtif": true, "condamne_tous_reveles": true, "aoe": true}'),        ("inq_chatiment_absolu",  "Châtiment Absolu",              '["inquisiteur"]', 5, 5, 16, 6, 6, "foi", 40, "ferveur", 0, 4, "Ignore toute défense. Condamnée : Stun 2 tours + 5 Brûlures.", "actif", "spe", '{"seuil": 4, "ignore_armor": true, "ignore_rob": true, "status_si_condamne": {"stun": 2, "brulure": 5}}'),        ("inq_confession",        "Confession Finale (Bonus)",     '["inquisiteur"]', 5, 5, 0, 6, 0, "foi", 70, "ferveur", 8, 6, "Question absolue — l'univers répond véridiquement.", "utilitaire", "spe", '{"seuil": 4, "rp_effect": "Posez question absolue sur mystère, org ou personne. MJ répond véridiquement et complètement."}'),
         ("inq_disparition",       "Disparition Administrative (Bonus)",'["inquisiteur"]',5, 5, 0, 5, 0, "foi", 40, "ferveur", 4, 6, "Fait disparaître un PNJ de la circulation 24h.", "utilitaire", "spe", '{"seuil": 3, "rp_effect": "PNJ disparaît de la circulation sans trace en 24h. Ne peut cibler PJs."}'),
 
-        
+        # ====================================================================================
+        # MAÎTRE D'ARSENAL — Sous-classe Guerrier
+        # ====================================================================================
+        # --- PASSIFS ---
+        ("passif_arsenal_debutant", "[Arsenal du Débutant] (Passif)", '["maitre_arsenal"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "Débloque le système d'Élan (plafond : 2 stacks).", "passif", "spe", '{"passif": "arsenal_debutant"}'),
+        ("passif_arsenal_rotation", "[Rotation Maîtrisée] (Passif)", '["maitre_arsenal"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Plafond d'Élan à 3. Chaque stack donne +1 Initiative.", "passif", "spe", '{"passif": "arsenal_rotation", "elan_max": 3}'),
+        ("passif_arsenal_second_fourreau", "[Second Fourreau] (Passif)", '["maitre_arsenal"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "Deux types d'armes actifs simultanément.", "passif", "spe", '{"passif": "arsenal_second_fourreau"}'),
+        ("passif_arsenal_complet", "[Arsenal Complet] (Passif)", '["maitre_arsenal"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "Plafond d'Élan à 4. Enchaînement ignore l'Armure si 3+ Élan consommé.", "passif", "spe", '{"passif": "arsenal_complet", "elan_max": 4}'),
+        ("passif_arsenal_maitre", "[Maître de l'Arsenal] (Passif)", '["maitre_arsenal"]', 5, 5, 0,0,0,"phy",0,"tension",0,0, "Plafond d'Élan à 5. 5 Élan consommé d'un coup : cooldown remis à 0.", "passif", "spe", '{"passif": "arsenal_maitre", "elan_max": 5}'),
+        # P1
+        ("arsenal_taillade_vive", "Taillade Vive", '["maitre_arsenal"]', 1, 1, 6, 3, 2, "phy", 1, "tension", 0, 1, "Dégâts physiques. Hémorragie si seuil atteint.", "actif", "spe", '{"arme_type": "lame", "seuil": 2, "status": {"hemorragie": 1}}'),
+        ("arsenal_coup_masse_novice", "Coup de Masse Novice", '["maitre_arsenal"]', 1, 1, 5, 3, 3, "phy", 1, "tension", 0, 2, "Dégâts physiques. Étourdissement si seuil atteint et ≥1 Élan actif.", "actif", "spe", '{"arme_type": "contondant", "seuil": 2, "elan_min_requis": 1, "elan_status": {"stun": 1}}'),
+        ("arsenal_estafilade_croisee", "Estafilade Croisée (Enchaînement)", '["maitre_arsenal"]', 1, 1, 3, 3, 2, "phy", 1, "tension", 0, 2, "Dégâts physiques. Consomme tout l'Élan : +2 Base par point.", "actif", "spe", '{"consume_elan_ratio": 2}'),
+        ("arsenal_fourbisseur", "Fourbisseur (Bonus)", '["maitre_arsenal"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 2, "Change d'arme visible. Regagne 1 Élan (1x/combat).", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Change d\'arme équipée visible instantanément.", "elan_gain": 1}'),
+        # P2
+        ("arsenal_fauchage_hache", "Fauchage de Hache", '["maitre_arsenal"]', 2, 2, 7, 4, 3, "phy", 2, "tension", 0, 2, "Dégâts physiques en zone. Hémorragie si seuil atteint.", "actif", "spe", '{"arme_type": "hache", "seuil": 2, "status": {"hemorragie": 1}, "aoe": true}'),
+        ("arsenal_pointe_avancee", "Pointe Avancée", '["maitre_arsenal"]', 2, 2, 6, 4, 3, "phy", 1, "tension", 0, 2, "Dégâts garantis 4. +2 Base si type d'arme précédent différent.", "actif", "spe", '{"arme_type": "allonge", "guaranteed_dmg": 4, "bonus_si_arme_diff": 2}'),
+        ("arsenal_trio_tranchant", "Trio Tranchant (Enchaînement)", '["maitre_arsenal"]', 2, 2, 4, 4, 3, "phy", 2, "tension", 0, 2, "Dégâts physiques. Consomme l'Élan : +2 Base/point, ignore Armure si 3+.", "actif", "spe", '{"consume_elan_ratio": 2, "ignore_armor_si_elan_min": 3}'),
+        ("arsenal_fourreau_rapide", "Fourreau Rapide (Bonus)", '["maitre_arsenal"]', 2, 2, 0, 2, 0, "phy", 0, "tension", 0, 3, "Avantage Force RP. 1x/combat : prochain changement d'arme = +2 Élan.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Avantage sur un jet Force RP pour intimider par la variété d\'armement visible."}'),
+        # P3
+        ("arsenal_frappe_jumelee", "Frappe Jumelée", '["maitre_arsenal"]', 3, 3, 8, 4, 4, "phy", 2, "tension", 0, 3, "Dégâts physiques. Compte comme deux types d'armes : +2 Élan.", "actif", "spe", '{"elan_gain": 2}'),
+        ("arsenal_charge_allonge", "Charge de l'Allonge", '["maitre_arsenal"]', 3, 3, 9, 4, 4, "phy", 2, "tension", 0, 3, "Dégâts physiques. Enracinement si seuil atteint.", "actif", "spe", '{"arme_type": "allonge", "seuil": 3, "status": {"root": 1}}'),
+        ("arsenal_deferlante_acier", "Déferlante d'Acier (Enchaînement)", '["maitre_arsenal"]', 3, 3, 5, 4, 4, "phy", 2, "tension", 0, 3, "Dégâts physiques. Consomme l'Élan : +3 Base par point.", "actif", "spe", '{"consume_elan_ratio": 3}'),
+        ("arsenal_inventaire_guerre", "Inventaire de Guerre (Bonus)", '["maitre_arsenal"]', 3, 3, 0, 3, 0, "phy", 0, "tension", 0, 4, "Révèle une faiblesse ennemie. 1x/combat : +1 Élan immédiat.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Révèle la faiblesse d\'Armure/Robustesse la plus exploitable de l\'ennemi.", "elan_gain": 1}'),
+        # P4
+        ("arsenal_tempete_lames", "Tempête de Lames", '["maitre_arsenal"]', 4, 4, 10, 5, 5, "phy", 3, "tension", 0, 3, "Dégâts physiques en zone. 2 Hémorragies si seuil atteint.", "actif", "spe", '{"arme_type": "lame", "seuil": 3, "status": {"hemorragie": 2}, "aoe": true}'),
+        ("arsenal_ecrasement_titanesque", "Écrasement Titanesque", '["maitre_arsenal"]', 4, 4, 12, 5, 5, "phy", 3, "tension", 0, 3, "Dégâts physiques. Étourdissement 2 tours si seuil atteint et ≥2 Élan.", "actif", "spe", '{"arme_type": "contondant", "seuil": 3, "elan_min_requis": 2, "elan_status": {"stun": 2}}'),
+        ("arsenal_symphonie_arsenal", "Symphonie de l'Arsenal (Enchaînement)", '["maitre_arsenal"]', 4, 4, 6, 5, 5, "phy", 3, "tension", 0, 4, "Dégâts physiques. Consomme l'Élan : +3 Base/point, ignore Armure si 3+.", "actif", "spe", '{"consume_elan_ratio": 3, "ignore_armor_si_elan_min": 3}'),
+        ("arsenal_fournisseur_guerre", "Fournisseur de Guerre (Bonus)", '["maitre_arsenal"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 4, "Fournit un outil de circonstance. 1x/combat : +2 Élan immédiat.", "utilitaire", "spe", '{"seuil": 2, "rp_effect": "Fournit une arme de circonstance adaptée à un problème hors-combat.", "elan_gain": 2}'),
+        # P5
+        ("arsenal_rafale_ultime", "Rafale Ultime", '["maitre_arsenal"]', 5, 5, 14, 6, 6, "phy", 4, "tension", 0, 4, "Dégâts massifs en zone. Hémorragie + Poison si seuil atteint.", "actif", "spe", '{"seuil": 3, "status": {"hemorragie": 1, "poison": 1}, "aoe": true}'),
+        ("arsenal_execution_arsenal", "Exécution de l'Arsenal (Enchaînement)", '["maitre_arsenal"]', 5, 5, 8, 6, 8, "phy", 4, "tension", 0, 5, "Dégâts physiques. Consomme l'Élan : +4 Base/point. Cible <25% PV : Exécution.", "actif", "spe", '{"consume_elan_ratio": 4, "execute_percent": 25}'),
+        ("arsenal_danse_ultime_lames", "Danse Ultime des Lames (Enchaînement, ultime)", '["maitre_arsenal"]', 5, 5, 16, 7, 7, "phy", 4, "tension", 0, 5, "Dégâts massifs. Consomme l'Élan : +5 Base/point, ignore Armure ET Rob si 5.", "actif", "spe", '{"consume_elan_ratio": 5, "ignore_armor_si_elan_min": 5, "ignore_rob_si_elan_min": 5}'),
+        ("arsenal_bon_outil", "Le Bon Outil (Bonus)", '["maitre_arsenal"]', 5, 5, 0, 4, 0, "phy", 0, "tension", 0, 5, "Produit un outil improvisé. 1x/combat : +3 Élan immédiat.", "utilitaire", "spe", '{"seuil": 2, "rp_effect": "Une fois/session, produit n\'importe quel outil/arme improvisée plausible pour une situation hors-combat.", "elan_gain": 3}'),
+
+        # ====================================================================================
+        # MOINE DU POING VIDE — Sous-classe Guerrier
+        # ====================================================================================
+        # --- PASSIFS ---
+        ("passif_moine_premier_souffle", "[Premier Souffle] (Passif)", '["moine_poing_vide"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "Débloque le Souffle du Vide. +1 Agilité (Initiative uniquement).", "passif", "spe", '{"passif": "moine_premier_souffle"}'),
+        ("passif_moine_second_souffle", "[Second Souffle] (Passif)", '["moine_poing_vide"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Malus d'Inspire réduit à -1 Base. Le Ki ne se perd jamais entre phases.", "passif", "spe", '{"passif": "moine_second_souffle"}'),
+        ("passif_moine_maitrise_rythme", "[Maîtrise du Rythme] (Passif)", '["moine_poing_vide"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "Bonus d'Expire porté à +3 Base par Ki. Résiste à moitié Poison/Brûlure.", "passif", "spe", '{"passif": "moine_maitrise_rythme"}'),
+        ("passif_moine_maitre_flux", "[Maître du Flux] (Passif)", '["moine_poing_vide"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "Riposte du Vide gratuite en Ki. Ki maximum stockable : 6.", "passif", "spe", '{"passif": "moine_maitre_flux"}'),
+        ("passif_moine_corps_vide", "[Corps-Vide] (Passif)", '["moine_poing_vide"]', 5, 5, 0,0,0,"phy",0,"tension",0,0, "1x/combat : survit à 1 PV si KO en phase Expire, repasse en Retenue.", "passif", "spe", '{"passif": "moine_corps_vide"}'),
+        # P1
+        ("moine_frappe_poing_vide", "Frappe du Poing Vide", '["moine_poing_vide"]', 1, 1, 5, 3, 3, "phy", 1, "tension", 0, 1, "Dégâts physiques, soumis aux modificateurs de phase du Souffle.", "actif", "spe", '{}'),
+        ("moine_garde_ki_novice", "Garde de Ki Novice (réaction, Retenue)", '["moine_poing_vide"]', 1, 1, 0, 2, 0, "phy", 1, "tension", 0, 1, "Réaction en phase Retenue : réduit les dégâts subis de 4.", "defense", "spe", '{"seuil": 1, "reduce_dmg_flat": 4, "rp_effect": "Utilisable uniquement en phase Retenue."}'),
+        ("moine_rupture_rythme_novice", "Rupture de Rythme Novice", '["moine_poing_vide"]', 1, 1, 0, 2, 0, "phy", 2, "tension", 0, 3, "Force le passage immédiat en phase Expire.", "utilitaire", "spe", '{"seuil": 1, "force_phase": "expire"}'),
+        ("moine_pas_fluide", "Pas Fluide (Bonus)", '["moine_poing_vide"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 2, "Déplacement silencieux. +1 Pièce sur la prochaine attaque.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Déplacement silencieux et rapide."}'),
+        # P2
+        ("moine_riposte_vide_novice", "Riposte du Vide Novice (réaction, Retenue)", '["moine_poing_vide"]', 2, 2, 4, 2, 2, "phy", 1, "tension", 0, 1, "Contre-attaque immédiate si touché en phase Retenue.", "actif", "spe", '{"seuil": 1, "rp_effect": "Utilisable uniquement en phase Retenue. Si touché ce tour : contre-attaque immédiate."}'),
+        ("moine_poing_libere", "Poing Libéré", '["moine_poing_vide"]', 2, 2, 6, 4, 3, "phy", 2, "tension", 0, 2, "Dégâts physiques. +50% Base si joué en phase Expire.", "actif", "spe", '{"bonus_si_expire_pct": 50}'),
+        ("moine_ancrage_souffle", "Ancrage du Souffle", '["moine_poing_vide"]', 2, 2, 0, 2, 0, "phy", 1, "tension", 0, 3, "Prolonge la phase Retenue d'un tour supplémentaire.", "utilitaire", "spe", '{"seuil": 1, "force_phase": "retenue_extend"}'),
+        ("moine_souffle_partage", "Souffle Partagé (Bonus)", '["moine_poing_vide"]', 2, 2, 0, 2, 0, "phy", 1, "tension", 0, 3, "Transmet 1 Ki à un allié Guerrier. Soin RP mineur (2 PV).", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Transmet 1 Ki à un allié Guerrier."}'),
+        # P3
+        ("moine_frappe_cent_pas", "Frappe des Cent Pas", '["moine_poing_vide"]', 3, 3, 9, 4, 4, "phy", 2, "tension", 0, 3, "Dégâts physiques. Enracinement si la cible a déjà subi Étourdissement.", "actif", "spe", '{"status_si_deja_stun": {"root": 1}}'),
+        ("moine_garde_ki_avancee", "Garde de Ki Avancée (réaction, Retenue)", '["moine_poing_vide"]', 3, 3, 0, 3, 0, "phy", 3, "tension", 0, 3, "Réduit les dégâts subis de 8 en Retenue. Regagne 1 Ki si annulés.", "defense", "spe", '{"seuil": 2, "reduce_dmg_flat": 8, "rp_effect": "Utilisable uniquement en phase Retenue."}'),
+        ("moine_rupture_rythme_avancee", "Rupture de Rythme Avancée", '["moine_poing_vide"]', 3, 3, 0, 3, 0, "phy", 2, "tension", 0, 4, "Force le passage en Expire. Le coup suivant en Expire ignore la Robustesse.", "utilitaire", "spe", '{"seuil": 1, "force_phase": "expire", "ignore_rob_prochain_expire": true}'),
+        ("moine_souffle_profond", "Souffle Profond (Bonus)", '["moine_poing_vide"]', 3, 3, 0, 2, 0, "phy", 0, "tension", 0, 1, "1x/combat : régénère 2 Ki sans changer de phase.", "utilitaire", "spe", '{"seuil": 1, "generate_tension": 2}'),
+        # P4
+        ("moine_tempete_poing_vide", "Tempête du Poing Vide", '["moine_poing_vide"]', 4, 4, 11, 5, 5, "phy", 3, "tension", 0, 3, "Dégâts physiques en zone. Étourdissement si la cible est enracinée.", "actif", "spe", '{"aoe": true, "status_si_deja_root": {"stun": 1}}'),
+        ("moine_deviation_totale", "Déviation Totale (réaction, Retenue)", '["moine_poing_vide"]', 4, 4, 0, 4, 0, "phy", 3, "tension", 0, 4, "Annule une attaque en Retenue et renvoie 75% des dégâts.", "defense", "spe", '{"seuil": 3, "rp_effect": "Utilisable uniquement en phase Retenue. Annule intégralement une attaque et renvoie 75% des dégâts."}'),
+        ("moine_inversion_souffle", "Inversion du Souffle", '["moine_poing_vide"]', 4, 4, 0, 3, 0, "phy", 3, "tension", 0, 5, "Repasse d'Expire à Retenue au lieu d'Inspire.", "utilitaire", "spe", '{"seuil": 1, "force_phase": "inverse"}'),
+        ("moine_meditation_combat", "Méditation de Combat (Bonus)", '["moine_poing_vide"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 1, "1x/combat : régénère 3 Ki sans changer de phase.", "utilitaire", "spe", '{"seuil": 1, "generate_tension": 3}'),
+        # P5
+        ("moine_mille_poings", "Mille Poings (ultime)", '["moine_poing_vide"]', 5, 5, 15, 6, 6, "phy", 4, "tension", 0, 4, "Dégâts massifs. Ignore Armure ET Robustesse si joué en Expire.", "actif", "spe", '{"ignore_armor_rob_si_expire": true}'),
+        ("moine_paume_neant", "Paume du Néant", '["moine_poing_vide"]', 5, 5, 10, 5, 7, "phy", 3, "tension", 0, 4, "Dégâts + Étourdissement si seuil atteint. Cible <20% PV : Exécution.", "actif", "spe", '{"seuil": 3, "status": {"stun": 2}, "execute_percent": 20}'),
+        ("moine_voile_impenetrable", "Voile Impénétrable (réaction, Retenue, ultime)", '["moine_poing_vide"]', 5, 5, 0, 5, 0, "phy", 4, "tension", 0, 5, "1x/combat : annule toutes les attaques ciblant vous ce tour, en Retenue.", "defense", "spe", '{"seuil": 3, "rp_effect": "Utilisable uniquement en phase Retenue. Annule TOUTES les attaques ciblant vous ce tour."}'),
+        ("moine_cent_un_souffle", "Cent-et-Unième Souffle (Bonus, ultime)", '["moine_poing_vide"]', 5, 5, 0, 4, 0, "phy", 0, "tension", 0, 1, "1x/combat : régénère tout le Ki et force le retour en Retenue.", "utilitaire", "spe", '{"seuil": 2, "force_phase": "retenue_extend"}'),
+
+        # ====================================================================================
+        # MAÎTRE DES OMBRES — Sous-classe Guerrier
+        # ====================================================================================
+        # --- PASSIFS ---
+        ("passif_ombres_instinct", "[Instinct du Prédateur] (Passif)", '["maitre_ombres"]', 1, 1, 0,0,0,"phy",0,"tension",0,0, "Sneak Attack : +50% Base via /attaque si la cible n'a pas défendu.", "passif", "spe", '{"passif": "ombres_instinct", "sneak_attack_pct": 50}'),
+        ("passif_ombres_lecture", "[Lecture de Faille] (Passif)", '["maitre_ombres"]', 2, 2, 0,0,0,"phy",0,"tension",0,0, "Sneak Attack porté à +75% Base.", "passif", "spe", '{"passif": "ombres_lecture", "sneak_attack_pct": 75}'),
+        ("passif_ombres_transition", "[Transition] (Passif)", '["maitre_ombres"]', 3, 3, 0,0,0,"phy",0,"tension",0,0, "Dès le Tour 3 : sorts de Tension à -1. Sneak Attack redescend à +50%.", "passif", "spe", '{"passif": "ombres_transition"}'),
+        ("passif_ombres_persistante", "[Ombre Persistante] (Passif)", '["maitre_ombres"]', 4, 4, 0,0,0,"phy",0,"tension",0,0, "Sneak Attack s'applique aussi si Encaisser (seule une Esquive réussie bloque).", "passif", "spe", '{"passif": "ombres_persistante"}'),
+        ("passif_ombres_predateur", "[Prédateur Ultime] (Passif)", '["maitre_ombres"]', 5, 5, 0,0,0,"phy",0,"tension",0,0, "Sneak Attack reste à +75% en Phase de Traque. Exécution auto sous 15% PV.", "passif", "spe", '{"passif": "ombres_predateur", "sneak_attack_pct": 75, "execute_percent": 15}'),
+        # P1
+        ("ombres_affut_silencieux", "Affût Silencieux (Préparation)", '["maitre_ombres"]', 1, 1, 0, 2, 0, "phy", 1, "tension", 0, 1, "Votre prochaine attaque via /attaque bénéficie du Sneak Attack, même défendue.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Usage unique en Phase de Chasse (Tours 1-2)."}'),
+        ("ombres_frappe_ombre_courte", "Frappe de l'Ombre Courte", '["maitre_ombres"]', 1, 1, 6, 3, 3, "phy", 1, "tension", 0, 1, "Dégâts physiques. Sneak Attack applicable via /attaque.", "actif", "spe", '{}'),
+        ("ombres_deviation_novice", "Déviation Novice (Clash uniquement)", '["maitre_ombres"]', 1, 1, 8, 5, 4, "phy", 1, "tension", 0, 3, "Utilisable en Clash. Base/Pièces/Bonus supérieurs à la normale. 0 dégât si Clash gagné.", "actif", "spe", '{"deviation_zero_dmg": true}'),
+        ("ombres_pas_ombre", "Pas dans l'Ombre (Bonus)", '["maitre_ombres"]', 1, 1, 0, 2, 0, "phy", 0, "tension", 0, 2, "Avantage Discrétion. 1x/combat : hausse le seuil de la prochaine attaque adverse.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Avantage sur un jet de Discrétion."}'),
+        # P2
+        ("ombres_poison_latent", "Poison Latent (Préparation)", '["maitre_ombres"]', 2, 2, 0, 3, 0, "phy", 2, "tension", 0, 1, "Votre prochaine attaque via /attaque inflige automatiquement 2 Poison.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Usage unique en Phase de Chasse. Votre prochaine attaque via /attaque qui touche inflige automatiquement 2 Poison, en plus de ses effets normaux."}'),
+        ("ombres_frappe_fauchante", "Frappe Fauchante", '["maitre_ombres"]', 2, 2, 8, 4, 4, "phy", 2, "tension", 0, 2, "Dégâts physiques. +3 Base si la cible est sous 50% PV.", "actif", "spe", '{"bonus_si_cible_sous_50pv": 3}'),
+        ("ombres_deviation_avancee", "Déviation Avancée (Clash uniquement)", '["maitre_ombres"]', 2, 2, 10, 7, 5, "phy", 2, "tension", 0, 3, "Utilisable en Clash. Base/Pièces/Bonus supérieurs à la normale. 0 dégât si Clash gagné.", "actif", "spe", '{"deviation_zero_dmg": true}'),
+        ("ombres_entaille_paralysante", "Entaille Paralysante (Bonus)", '["maitre_ombres"]', 2, 2, 0, 3, 0, "phy", 1, "tension", 0, 3, "Inflige 2 Poison + réduit la Base de la prochaine attaque de la cible de 2.", "actif", "spe", '{"seuil": 2, "status": {"poison": 2}}'),
+        # P3
+        ("ombres_marque_chasseur", "Marque du Chasseur (Préparation)", '["maitre_ombres"]', 3, 3, 0, 3, 0, "phy", 2, "tension", 0, 1, "Désigne une cible : votre prochaine Exécution contre elle est facilitée.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Usage unique en Phase de Chasse."}'),
+        ("ombres_estocade_second_souffle", "Estocade du Second Souffle", '["maitre_ombres"]', 3, 3, 10, 4, 4, "phy", 2, "tension", 0, 2, "Dégâts physiques. +2 Base si la cible a subi Poison ce combat.", "actif", "spe", '{"bonus_si_poison": 2}'),
+        ("ombres_nuage_toxique", "Nuage Toxique", '["maitre_ombres"]', 3, 3, 6, 4, 3, "phy", 2, "tension", 0, 3, "Dégâts physiques en zone. Poison si seuil atteint.", "actif", "spe", '{"seuil": 2, "status": {"poison": 2}, "aoe": true}'),
+        ("ombres_retrait_tactique", "Retrait Tactique (Bonus)", '["maitre_ombres"]', 3, 3, 0, 3, 0, "phy", 0, "tension", 0, 3, "Se replace hors de portée. En Traque : partage 1 Poison à un allié en Clash.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Se replace hors de portée immédiate sans quitter le combat."}'),
+        # P4
+        ("ombres_embuscade_totale", "Embuscade Totale (Préparation, 1x/combat)", '["maitre_ombres"]', 4, 4, 0, 4, 0, "phy", 3, "tension", 0, 1, "Prochaine attaque via /attaque : Sneak Attack à +100%, peu importe la défense.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Usage unique en Phase de Chasse."}'),
+        ("ombres_laceration_profonde", "Lacération Profonde", '["maitre_ombres"]', 4, 4, 12, 5, 5, "phy", 3, "tension", 0, 3, "Dégâts physiques. 3 Hémorragies si seuil atteint.", "actif", "spe", '{"seuil": 3, "status": {"hemorragie": 3}}'),
+        ("ombres_toxine_debilitante", "Toxine Débilitante", '["maitre_ombres"]', 4, 4, 8, 4, 4, "phy", 2, "tension", 0, 3, "Dégâts physiques. Poison + Toxine si seuil atteint.", "actif", "spe", '{"seuil": 3, "status": {"poison": 3, "toxine": 1}}'),
+        ("ombres_oeil_traqueur", "Œil du Traqueur (Bonus)", '["maitre_ombres"]', 4, 4, 0, 3, 0, "phy", 0, "tension", 0, 3, "Révèle les PV actuels de la cible. En Traque : +2 Pièces à un allié.", "utilitaire", "spe", '{"seuil": 2, "rp_effect": "Révèle les PV actuels de la cible."}'),
+        # P5
+        ("ombres_sentence_chasseur", "Sentence du Chasseur (ultime, exécution)", '["maitre_ombres"]', 5, 5, 10, 6, 6, "phy", 4, "tension", 0, 4, "Dégâts massifs. Sneak Attack applicable. Cible <25% PV : Exécution.", "actif", "spe", '{"execute_percent": 25}'),
+        ("ombres_deviation_maitrisee", "Déviation Maîtrisée (Clash uniquement, ultime)", '["maitre_ombres"]', 5, 5, 13, 10, 7, "phy", 3, "tension", 0, 4, "Utilisable en Clash. Base/Pièces/Bonus écrasants. 0 dégât si Clash gagné.", "actif", "spe", '{"deviation_zero_dmg": true}'),
+        ("ombres_brume_empoisonnee", "Brume Empoisonnée Totale (ultime support)", '["maitre_ombres"]', 5, 5, 8, 5, 4, "phy", 3, "tension", 0, 4, "Dégâts physiques en zone. Poison + malus Base si seuil atteint.", "actif", "spe", '{"seuil": 3, "status": {"poison": 3}, "aoe": true}'),
+        ("ombres_derniere_ombre", "Dernière Ombre (Bonus, ultime)", '["maitre_ombres"]', 5, 5, 0, 4, 0, "phy", 0, "tension", 0, 5, "1x/combat : régénère 3 Tension et réactive une Préparation déjà utilisée.", "utilitaire", "spe", '{"seuil": 2, "generate_tension": 3}'),
+
+        # ====================================================================================
+        # MAGIE DE LA CHASSE — Sous-classe Mage
+        # ====================================================================================
+        # --- PASSIFS ---
+        ("passif_chasse_premier_contrat", "[Premier Contrat] (Passif)", '["magie_chasse"]', 1, 1, 0,0,0,"esp",0,"mana",0,0, "Invoque votre Familier de Chasse (1x/combat, gratuit).", "passif", "spe", '{"passif": "chasse_premier_contrat"}'),
+        ("passif_chasse_lien_renforce", "[Lien Renforcé] (Passif)", '["magie_chasse"]', 2, 2, 0,0,0,"esp",0,"mana",0,0, "Le Familier gagne une capacité active au choix.", "passif", "spe", '{"passif": "chasse_lien_renforce"}'),
+        ("passif_chasse_instinct_meute", "[Instinct de Meute] (Passif)", '["magie_chasse"]', 3, 3, 0,0,0,"esp",0,"mana",0,0, "Le Familier inflige un statut à chaque attaque automatique.", "passif", "spe", '{"passif": "chasse_instinct_meute"}'),
+        ("passif_chasse_evolution", "[Évolution du Familier] (Passif)", '["magie_chasse"]', 4, 4, 0,0,0,"esp",0,"mana",0,0, "Le Familier évolue : PV et dégâts de base doublent.", "passif", "spe", '{"passif": "chasse_evolution"}'),
+        ("passif_chasse_pacte_ultime", "[Pacte Ultime] (Passif)", '["magie_chasse"]', 5, 5, 0,0,0,"esp",0,"mana",0,0, "1x/combat : le Familier se sacrifie pour absorber une attaque.", "passif", "spe", '{"passif": "chasse_pacte_ultime"}'),
+        # P1
+        ("chasse_balle_percante_novice", "Balle Perçante Novice (Balle Magique)", '["magie_chasse"]', 1, 1, 6, 3, 3, "esp", 10, "mana", 0, 1, "Dégâts fiables, seuil bas.", "actif", "spe", '{"seuil": 1}'),
+        ("chasse_appel_familier", "Appel du Familier", '["magie_chasse"]', 1, 1, 0, 2, 0, "esp", 8, "mana", 0, 4, "Invoque/rappelle le Familier, ou lui ordonne d'attaquer immédiatement.", "utilitaire", "spe", '{"seuil": 1, "invoque_familier": true}'),
+        ("chasse_repas_chasseur", "Repas du Chasseur (Bonus, hors-combat)", '["magie_chasse"]', 1, 1, 0, 2, 0, "esp", 5, "mana", 0, 1, "Prépare un Plat de Chasseur : buff mineur pour le prochain combat.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Prépare un Plat de Chasseur donnant un buff mineur pour le prochain combat. Nécessite un /repos avant le combat."}'),
+        ("chasse_piege_racine", "Piège Racine (Bonus, Piège)", '["magie_chasse"]', 1, 1, 0, 3, 0, "esp", 20, "mana", 0, 3, "Pose un piège. Si seuil atteint : Enracinement au prochain acte de la cible.", "utilitaire", "spe", '{"seuil": 2, "pose_piege": {"status": {"root": 1}}}'),
+        # P2
+        ("chasse_balle_toxique_avancee", "Balle Toxique Avancée", '["magie_chasse"]', 2, 2, 7, 3, 3, "esp", 14, "mana", 0, 2, "Dégâts. Poison si seuil atteint.", "actif", "spe", '{"seuil": 2, "status": {"poison": 2}}'),
+        ("chasse_piege_machoires", "Piège à Mâchoires (Bonus, Piège)", '["magie_chasse"]', 2, 2, 4, 3, 2, "esp", 28, "mana", 0, 3, "Pose un piège. Si seuil atteint : dégâts + Enracinement 2 tours.", "utilitaire", "spe", '{"seuil": 2, "pose_piege": {"degats": 4, "status": {"root": 2}}}'),
+        ("chasse_cor_chasse", "Cor de Chasse", '["magie_chasse"]', 2, 2, 0, 2, 0, "esp", 10, "mana", 0, 3, "Soigne le Familier de 30% de ses PV max, ou le rappelle à 50%.", "utilitaire", "spe", '{"seuil": 1, "soigne_familier_pct": 30}'),
+        ("chasse_ration_chasseur", "Ration de Chasseur (Bonus)", '["magie_chasse"]', 2, 2, 0, 2, 0, "esp", 5, "mana", 0, 1, "Améliore le Plat de Chasseur : dure toute la session.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Le buff du Plat de Chasseur dure toute la session au lieu d\'un seul combat."}'),
+        # P3
+        ("chasse_balle_perforante_avancee", "Balle Perforante Avancée", '["magie_chasse"]', 3, 3, 9, 4, 4, "esp", 18, "mana", 0, 2, "Dégâts. Ignore l'Armure si seuil atteint.", "actif", "spe", '{"seuil": 3, "ignore_armor": true}'),
+        ("chasse_piege_explosif", "Piège Explosif (Bonus, Piège)", '["magie_chasse"]', 3, 3, 6, 3, 3, "esp", 36, "mana", 0, 4, "Pose un piège. Si seuil atteint : dégâts de zone + Étourdissement.", "utilitaire", "spe", '{"seuil": 2, "pose_piege": {"degats": 6, "status": {"stun": 1}, "aoe": true}}'),
+        ("chasse_charge_familier", "Charge du Familier", '["magie_chasse"]', 3, 3, 0, 3, 0, "esp", 14, "mana", 0, 3, "Le Familier attaque immédiatement pour (niveau x2) dégâts.", "utilitaire", "spe", '{"seuil": 1, "familier_attaque_mult": 2}'),
+        ("chasse_grand_festin", "Grand Festin (Bonus)", '["magie_chasse"]', 3, 3, 0, 3, 0, "esp", 8, "mana", 0, 1, "Prépare un Plat de Chasseur à deux effets combinés.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Prépare un Plat de Chasseur à DEUX effets combinés au lieu d\'un seul."}'),
+        ("chasse_balle_explosive_chargee", "Balle Explosive Chargée (coûteux)", '["magie_chasse"]', 3, 3, 16, 4, 5, "esp", 30, "mana", 0, 5, "Dégâts très élevés. Étourdissement si seuil dépassé de 2+.", "actif", "spe", '{"seuil": 5, "status": {"stun": 1}}'),
+        # P4
+        ("chasse_rafale_balles", "Rafale de Balles", '["magie_chasse"]', 4, 4, 11, 5, 4, "esp", 24, "mana", 0, 3, "Dégâts en zone. Poison si seuil atteint.", "actif", "spe", '{"seuil": 3, "status": {"poison": 1}, "aoe": true}'),
+        ("chasse_piege_ours_renforce", "Piège à Ours Renforcé (Bonus, Piège)", '["magie_chasse"]', 4, 4, 8, 4, 3, "esp", 48, "mana", 0, 4, "Pose un piège. Si seuil atteint : dégâts + Enracinement + malus Base.", "utilitaire", "spe", '{"seuil": 3, "pose_piege": {"degats": 8, "status": {"root": 2}}}'),
+        ("chasse_chasse_coordonnee", "Chasse Coordonnée", '["magie_chasse"]', 4, 4, 8, 4, 4, "esp", 20, "mana", 0, 3, "Dégâts. Le Familier attaque simultanément pour (niveau) dégâts additionnels.", "actif", "spe", '{"familier_attaque_mult": 1}'),
+        ("chasse_banquet_veteran", "Banquet du Chasseur Vétéran (Bonus)", '["magie_chasse"]', 4, 4, 0, 3, 0, "esp", 10, "mana", 0, 1, "Le Plat de Chasseur peut être partagé avec un allié présent.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Un allié présent lors de la préparation bénéficie aussi du buff."}'),
+        # P5
+        ("chasse_tir_grace", "Tir de Grâce (ultime)", '["magie_chasse"]', 5, 5, 16, 6, 6, "esp", 35, "mana", 0, 4, "Dégâts massifs. Cible <25% PV : Exécution.", "actif", "spe", '{"execute_percent": 25}'),
+        ("chasse_piege_mortel", "Piège Mortel (Bonus, ultime)", '["magie_chasse"]', 5, 5, 10, 5, 4, "esp", 65, "mana", 0, 5, "Pose un piège. Si seuil atteint : dégâts massifs + Enracinement, ignore Rob.", "utilitaire", "spe", '{"seuil": 3, "pose_piege": {"degats": 10, "status": {"root": 2}, "ignore_rob": true}}'),
+        ("chasse_assaut_meute", "Assaut de la Meute (ultime)", '["magie_chasse"]', 5, 5, 14, 5, 6, "esp", 30, "mana", 0, 4, "Dégâts. Le Familier attaque pour (niveau x3) dégâts additionnels.", "actif", "spe", '{"familier_attaque_mult": 3}'),
+        ("chasse_festin_legendaire", "Festin Légendaire (Bonus, ultime)", '["magie_chasse"]', 5, 5, 0, 4, 0, "esp", 15, "mana", 0, 6, "Plat de Chasseur Légendaire : effet majeur, partageable au groupe.", "utilitaire", "spe", '{"seuil": 1, "rp_effect": "Effet majeur au choix avec le MJ, partageable à tout le groupe présent."}'),
+        ("chasse_tir_devastateur", "Tir Dévastateur (ultime, très coûteux)", '["magie_chasse"]', 5, 5, 22, 6, 6, "esp", 45, "mana", 0, 6, "Dégâts colossaux ignorant Armure ET Robustesse. Échec du seuil : sort perdu.", "actif", "spe", '{"seuil": 4, "ignore_armor": true, "ignore_rob": true}'),
+
     ]
 
 
@@ -1236,6 +1395,17 @@ class Personnage:
         self.sentence_targets = []  # Liste des cibles Condamnées (P3: max 2, P5: max 3)
         self.passe_count = 0        # Nb de Passes jouées ce tour (Art de l'Estoc Maîtrisé P5)
         self.badges = []            # Titres et récompenses RP accordés par le MJ
+        # ── Maître d'Arsenal ──
+        self.elan_actuel = 0
+        self.elan_max = 2
+        self.dernier_type_arme = ""
+        # ── Moine du Poing Vide ──
+        self.souffle_phase = 0      # 0=Inspire, 1=Retenue, 2=Expire
+        # ── Magie de la Chasse ──
+        self.familier_pv = 0
+        self.familier_pv_max = 0
+        self.familier_actif = 0
+        self.pieges_poses = []      # Liste de {"cible_user_id":..., "effet":{...}, "pose_par":...}
         # ── Flags temporaires (non persistés en DB) ──
         self._ignore_armor = False
         self._ignore_rob   = False
@@ -1362,9 +1532,12 @@ class Personnage:
              designation_target_id, designation_stacks, sentence_target_id, sentence_targets, passe_count, badges, mana_bonus_racial,
              bonus_base_item, bonus_pieces_item, mana_max_bonus_item, pv_max_bonus_item,
              gm_mana_max_bonus, gm_pv_max_bonus, versets_max_bonus_racial,
-             gm_bonus_base_item, gm_bonus_pieces_item, gm_pv_max_bonus_item, gm_mana_max_bonus_item)
+             gm_bonus_base_item, gm_bonus_pieces_item, gm_pv_max_bonus_item, gm_mana_max_bonus_item,
+             elan_actuel, elan_max, dernier_type_arme, souffle_phase,
+             familier_pv, familier_pv_max, familier_actif, pieges_poses)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (self.user_id, self.nom, self.classe, self.race, self.niveau,
               self.pv_actuel, self.pv_max, self.mana, self.mana_max,
               self.tension, self.ferveur, self.versets,
@@ -1385,7 +1558,11 @@ class Personnage:
               getattr(self, 'gm_mana_max_bonus', 0), getattr(self, 'gm_pv_max_bonus', 0),
               getattr(self, 'versets_max_bonus_racial', 0),
               getattr(self, 'gm_bonus_base_item', 0), getattr(self, 'gm_bonus_pieces_item', 0),
-              getattr(self, 'gm_pv_max_bonus_item', 0), getattr(self, 'gm_mana_max_bonus_item', 0)))
+              getattr(self, 'gm_pv_max_bonus_item', 0), getattr(self, 'gm_mana_max_bonus_item', 0),
+              getattr(self, 'elan_actuel', 0), getattr(self, 'elan_max', 2),
+              getattr(self, 'dernier_type_arme', ''), getattr(self, 'souffle_phase', 0),
+              getattr(self, 'familier_pv', 0), getattr(self, 'familier_pv_max', 0),
+              getattr(self, 'familier_actif', 0), json.dumps(getattr(self, 'pieges_poses', []))))
         
         # Ne mettre à jour la session que si ce personnage est déjà le personnage actif
         # Évite d'écraser la session du MJ quand il sauvegarde un PNJ/monstre en combat
@@ -1432,6 +1609,8 @@ class Personnage:
         p.festin = row['festin'] if 'festin' in row.keys() else 0
         try: p.charges_elementaires = json.loads(row['charges_elementaires']) if 'charges_elementaires' in row.keys() else []
         except (json.JSONDecodeError, TypeError): p.charges_elementaires = []
+        try: p.pieges_poses = json.loads(row['pieges_poses']) if 'pieges_poses' in row.keys() else []
+        except (json.JSONDecodeError, TypeError): p.pieges_poses = []
         # ── Sous-classes V4 ──
         p.passe_active = row['passe_active'] if 'passe_active' in row.keys() else 0
         p.parade_absorb = row['parade_absorb'] if 'parade_absorb' in row.keys() else 0
@@ -1446,6 +1625,13 @@ class Personnage:
         p.mana_max_bonus_item = row['mana_max_bonus_item'] if 'mana_max_bonus_item' in row.keys() else 0
         p.pv_max_bonus_item = row['pv_max_bonus_item'] if 'pv_max_bonus_item' in row.keys() else 0
         p.gm_mana_max_bonus = row['gm_mana_max_bonus'] if 'gm_mana_max_bonus' in row.keys() else 0
+        p.elan_actuel = row['elan_actuel'] if 'elan_actuel' in row.keys() else 0
+        p.elan_max = row['elan_max'] if 'elan_max' in row.keys() else 2
+        p.dernier_type_arme = row['dernier_type_arme'] if 'dernier_type_arme' in row.keys() else ''
+        p.souffle_phase = row['souffle_phase'] if 'souffle_phase' in row.keys() else 0
+        p.familier_pv = row['familier_pv'] if 'familier_pv' in row.keys() else 0
+        p.familier_pv_max = row['familier_pv_max'] if 'familier_pv_max' in row.keys() else 0
+        p.familier_actif = row['familier_actif'] if 'familier_actif' in row.keys() else 0
         p.gm_pv_max_bonus = row['gm_pv_max_bonus'] if 'gm_pv_max_bonus' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
@@ -1493,6 +1679,8 @@ class Personnage:
         p.festin = row['festin'] if 'festin' in row.keys() else 0
         try: p.charges_elementaires = json.loads(row['charges_elementaires']) if 'charges_elementaires' in row.keys() else []
         except (json.JSONDecodeError, TypeError): p.charges_elementaires = []
+        try: p.pieges_poses = json.loads(row['pieges_poses']) if 'pieges_poses' in row.keys() else []
+        except (json.JSONDecodeError, TypeError): p.pieges_poses = []
         p.passe_active = row['passe_active'] if 'passe_active' in row.keys() else 0
         p.parade_absorb = row['parade_absorb'] if 'parade_absorb' in row.keys() else 0
         p.last_action_type = row['last_action_type'] if 'last_action_type' in row.keys() else 'autre'
@@ -1505,6 +1693,13 @@ class Personnage:
         p.bonus_pieces_item = row['bonus_pieces_item'] if 'bonus_pieces_item' in row.keys() else 0
         p.mana_max_bonus_item = row['mana_max_bonus_item'] if 'mana_max_bonus_item' in row.keys() else 0
         p.pv_max_bonus_item = row['pv_max_bonus_item'] if 'pv_max_bonus_item' in row.keys() else 0
+        p.elan_actuel = row['elan_actuel'] if 'elan_actuel' in row.keys() else 0
+        p.elan_max = row['elan_max'] if 'elan_max' in row.keys() else 2
+        p.dernier_type_arme = row['dernier_type_arme'] if 'dernier_type_arme' in row.keys() else ''
+        p.souffle_phase = row['souffle_phase'] if 'souffle_phase' in row.keys() else 0
+        p.familier_pv = row['familier_pv'] if 'familier_pv' in row.keys() else 0
+        p.familier_pv_max = row['familier_pv_max'] if 'familier_pv_max' in row.keys() else 0
+        p.familier_actif = row['familier_actif'] if 'familier_actif' in row.keys() else 0
         p.posture_active = row['posture_active'] if 'posture_active' in row.keys() else 0
         p.designation_target_id = row['designation_target_id'] if 'designation_target_id' in row.keys() else 0
         p.designation_stacks = row['designation_stacks'] if 'designation_stacks' in row.keys() else 0
@@ -2850,7 +3045,172 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
             attaquant.effets["aura_active"] = {"duree": 9999, "valeur": attaquant.user_id}
             msg.append("✨ **Aura de Sacrifice** activée ! Vous absorbez 3 dégâts (ou 6 sous 25% PV) pour chaque allié protégé.")
 
+    # ==========================================
+    # --- MAÎTRE D'ARSENAL : Élan ---
+    # ==========================================
+    if attaquant and "maitre_arsenal" in attaquant.sous_classes_unlocked:
+        elan_max_perso = getattr(attaquant, "elan_max", 2)
+        dernier_arme = getattr(attaquant, "dernier_type_arme", "")
+
+        # Bonus si le type d'arme précédent était différent (avant mise à jour)
+        if "bonus_si_arme_diff" in data and dernier_arme and dernier_arme != data.get("arme_type"):
+            degats_finaux += data["bonus_si_arme_diff"]
+            msg.append(f"🗡️ **Changement d'arme** : +{data['bonus_si_arme_diff']} Base.")
+
+        # Consommation de l'Élan (sorts « Enchaînement »)
+        if "consume_elan_ratio" in data:
+            elan_consomme = getattr(attaquant, "elan_actuel", 0)
+            if elan_consomme > 0:
+                bonus_enchainement = elan_consomme * data["consume_elan_ratio"]
+                degats_finaux += bonus_enchainement
+                msg.append(f"⚔️ **Enchaînement** : {elan_consomme} Élan consommé → +{bonus_enchainement} Base.")
+                attaquant.elan_actuel = 0
+            if data.get("ignore_armor_si_elan_min") and elan_consomme >= data["ignore_armor_si_elan_min"]:
+                attaquant._ignore_armor = True
+                msg.append("🗡️ **Élan maximal** : Armure ignorée !")
+            if data.get("ignore_rob_si_elan_min") and elan_consomme >= data["ignore_rob_si_elan_min"]:
+                attaquant._ignore_rob = True
+                msg.append("🗡️ **Élan maximal** : Robustesse ignorée !")
+
+        # Statut conditionné à l'Élan actuellement en réserve (avant tout gain de ce tour)
+        if "elan_min_requis" in data and "elan_status" in data:
+            if getattr(attaquant, "elan_actuel", 0) >= data["elan_min_requis"]:
+                for effet, valeur in data["elan_status"].items():
+                    defenseur.ajouter_effet(effet, valeur)
+                    msg.append(f"{icones.get(effet, '✨')} **{effet.capitalize()}** ({valeur}) appliqué (Élan) !")
+
+        # Gain d'Élan direct (Bonus de régénération, sorts comptant double, etc.)
+        if "elan_gain" in data:
+            attaquant.elan_actuel = min(elan_max_perso, getattr(attaquant, "elan_actuel", 0) + data["elan_gain"])
+            msg.append(f"🌀 **Élan** : +{data['elan_gain']} (total : {attaquant.elan_actuel}/{elan_max_perso}).")
+        elif "arme_type" in data:
+            if data["arme_type"] != dernier_arme:
+                attaquant.elan_actuel = min(elan_max_perso, getattr(attaquant, "elan_actuel", 0) + 1)
+                msg.append(f"🌀 **Élan** : +1 (total : {attaquant.elan_actuel}/{elan_max_perso}).")
+            attaquant.dernier_type_arme = data["arme_type"]
+
+    # --- Statuts conditionnels génériques (état déjà présent sur la cible) ---
+    for flag_name, condition_effet in (("status_si_deja_stun", "stun"), ("status_si_deja_root", "root")):
+        if flag_name in data and defenseur and condition_effet in defenseur.effets:
+            for effet, valeur in data[flag_name].items():
+                defenseur.ajouter_effet(effet, valeur)
+                msg.append(f"{icones.get(effet, '✨')} **{effet.capitalize()}** ({valeur}) appliqué !")
+
+    # ==========================================
+    # --- MOINE DU POING VIDE : Souffle du Vide ---
+    # ==========================================
+    if attaquant and "moine_poing_vide" in attaquant.sous_classes_unlocked:
+        if "force_phase" in data:
+            cible_phase = data["force_phase"]
+            if cible_phase == "expire":
+                attaquant.souffle_phase = 2
+                msg.append("🌬️ **Souffle** : passage immédiat en phase Expire.")
+            elif cible_phase == "retenue_extend":
+                attaquant.souffle_phase = 1
+                msg.append("🌬️ **Souffle** : phase Retenue maintenue.")
+            elif cible_phase == "inverse":
+                if attaquant.souffle_phase == 2:
+                    attaquant.souffle_phase = 1
+                    msg.append("🌬️ **Inversion du Souffle** : Expire → Retenue.")
+                else:
+                    msg.append("🌬️ **Inversion du Souffle** : aucun effet hors phase Expire.")
+            if data.get("ignore_rob_prochain_expire"):
+                attaquant.effets["_moine_ignore_rob_expire"] = {"duree": 3, "valeur": 1}
+        elif degats_finaux > 0:
+            phase_avant = getattr(attaquant, "souffle_phase", 0)
+            if phase_avant == 0:
+                malus = 1 if "passif_moine_second_souffle" in attaquant.competences else 2
+                degats_finaux = max(0, degats_finaux - malus)
+                attaquant.tension = getattr(attaquant, "tension", 0) + 2
+                msg.append(f"🌬️ **Souffle (Inspire)** : -{malus} Base, +2 Ki en réserve.")
+                attaquant.souffle_phase = 1
+            elif phase_avant == 1:
+                msg.append("🌬️ **Souffle (Retenue)** : dégâts normaux.")
+                attaquant.souffle_phase = 2
+            else:
+                ki_consomme = getattr(attaquant, "tension", 0)
+                ratio = 3 if "passif_moine_maitrise_rythme" in attaquant.competences else 1
+                if ki_consomme > 0:
+                    bonus_expire = ki_consomme * ratio
+                    degats_finaux += bonus_expire
+                    attaquant.tension = 0
+                    msg.append(f"🌬️ **Souffle (Expire)** : {ki_consomme} Ki consommé → +{bonus_expire} Base.")
+                if data.get("bonus_si_expire_pct"):
+                    bonus_pct = int(degats_finaux * data["bonus_si_expire_pct"] / 100)
+                    degats_finaux += bonus_pct
+                    msg.append(f"🌬️ **Expire** : +{data['bonus_si_expire_pct']}% Base.")
+                if data.get("ignore_armor_rob_si_expire"):
+                    attaquant._ignore_armor = True
+                    attaquant._ignore_rob = True
+                    msg.append("🌬️ **Expire** : Armure ET Robustesse ignorées !")
+                if attaquant.effets.pop("_moine_ignore_rob_expire", None):
+                    attaquant._ignore_rob = True
+                    msg.append("🌬️ **Rupture de Rythme** : Robustesse ignorée !")
+                attaquant.souffle_phase = 0
+
+    # ==========================================
+    # --- MAÎTRE DES OMBRES : bonus conditionnels ---
+    # ==========================================
+    if data.get("bonus_si_cible_sous_50pv") and defenseur and defenseur.pv_max > 0 and defenseur.pv_actuel < defenseur.pv_max * 0.5:
+        degats_finaux += data["bonus_si_cible_sous_50pv"]
+        msg.append(f"🎯 **Cible affaiblie** : +{data['bonus_si_cible_sous_50pv']} Base.")
+    if data.get("bonus_si_poison") and defenseur and "poison" in defenseur.effets:
+        degats_finaux += data["bonus_si_poison"]
+        msg.append(f"☠️ **Poison actif** : +{data['bonus_si_poison']} Base.")
+
+    # ==========================================
+    # --- MAGIE DE LA CHASSE : Familier & Pièges ---
+    # ==========================================
+    if attaquant and "magie_chasse" in attaquant.sous_classes_unlocked:
+        if data.get("invoque_familier"):
+            if not attaquant.familier_actif:
+                attaquant.familier_pv_max = max(10, int(attaquant.pv_max * 0.3))
+                attaquant.familier_pv = attaquant.familier_pv_max
+                attaquant.familier_actif = 1
+                msg.append(f"🐾 **Familier invoqué** ({attaquant.familier_pv}/{attaquant.familier_pv_max} PV) !")
+            elif defenseur:
+                degats_familier = attaquant.niveau
+                defenseur.pv_actuel -= degats_familier
+                msg.append(f"🐾 **Familier** : attaque immédiate pour {degats_familier} dégâts !")
+        if "soigne_familier_pct" in data:
+            if attaquant.familier_actif:
+                soin = int(attaquant.familier_pv_max * data["soigne_familier_pct"] / 100)
+                attaquant.familier_pv = min(attaquant.familier_pv_max, attaquant.familier_pv + soin)
+                msg.append(f"🐾 **Familier soigné** : +{soin} PV ({attaquant.familier_pv}/{attaquant.familier_pv_max}).")
+            else:
+                attaquant.familier_pv_max = max(10, int(attaquant.pv_max * 0.3))
+                attaquant.familier_pv = max(1, attaquant.familier_pv_max // 2)
+                attaquant.familier_actif = 1
+                msg.append(f"🐾 **Familier rappelé** à demi-PV ({attaquant.familier_pv}/{attaquant.familier_pv_max}).")
+        if data.get("familier_attaque_mult") and attaquant.familier_actif and defenseur:
+            degats_familier = attaquant.niveau * data["familier_attaque_mult"]
+            defenseur.pv_actuel -= degats_familier
+            msg.append(f"🐾 **Familier** : attaque simultanée pour {degats_familier} dégâts !")
+        if "pose_piege" in data and defenseur:
+            defenseur.pieges_poses = list(getattr(defenseur, "pieges_poses", [])) + [
+                {"effet": data["pose_piege"], "pose_par": attaquant.nom}
+            ]
+            msg.append(f"🪤 **Piège posé** sur {defenseur.nom} — se déclenchera à sa prochaine action.")
+
     return degats_finaux, "\n".join(msg)
+
+
+def declencher_pieges(p: Personnage) -> str:
+    """Déclenche le premier piège en attente sur ce personnage (Magie de la Chasse).
+    Le seuil a déjà été validé au moment de la pose : l'effet s'applique ici automatiquement."""
+    if not getattr(p, "pieges_poses", None):
+        return ""
+    piege = p.pieges_poses.pop(0)
+    effet = piege.get("effet", {})
+    lignes = [f"🪤 **Piège déclenché !** (posé par {piege.get('pose_par', 'un chasseur')})"]
+    degats = effet.get("degats", 0)
+    if degats:
+        p.pv_actuel -= degats
+        lignes.append(f"💥 {degats} dégâts.")
+    for code, valeur in effet.get("status", {}).items():
+        p.ajouter_effet(code, valeur)
+        lignes.append(f"✨ **{code.capitalize()}** ({valeur}) appliqué !")
+    return "\n".join(lignes)
 
 
 def verifier_cooldown(personnage: Personnage, sort_ref: str):
@@ -2926,6 +3286,14 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible d'agir.", ephemeral=True)
     if "no_bonus_action" in p.effets:
         return await interaction.followup.send("🎯 **Paralysie Neurale** : Vous ne pouvez pas utiliser d'Action Bonus ce tour !", ephemeral=True)
+
+    # --- Déclenchement d'un piège en attente (Magie de la Chasse) ---
+    if getattr(p, "pieges_poses", None):
+        msg_piege = declencher_pieges(p)
+        p.sauvegarder()
+        if msg_piege: await interaction.followup.send(msg_piege)
+        if p.pv_actuel <= 0:
+            return await interaction.followup.send(f"💀 **{p.nom}** est K.O. suite au déclenchement du piège !")
     if "toxine" in p.effets:
         return await interaction.followup.send("🧪 **Neurotoxine** : La Toxine vous empêche d'utiliser une Action Bonus ce tour !", ephemeral=True)
 
@@ -4166,6 +4534,12 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
             _data_clash_sing = {}
             try: _data_clash_sing = json.loads(json_v)
             except (json.JSONDecodeError, TypeError): pass
+
+            # --- MAÎTRE DES OMBRES : Déviation — gagne le Clash mais inflige 0 dégât ---
+            if _data_clash_sing.get("deviation_zero_dmg"):
+                damage_final = 0
+                bonus_txt += "\n🗡️ **Déviation** : le Clash est remporté, mais aucun dégât n'est infligé."
+
             if not _data_clash_sing.get("check_singularite_all") and "singularite" in perdant.effets:
                 ignore_sing_c, bonus_sing_c, msg_sing_c = consommer_singularite(perdant, vainqueur)
                 if ignore_sing_c:
@@ -4492,6 +4866,14 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
 
     if is_stun_actif(p): return await interaction.followup.send("💫 **Étourdi !**", ephemeral=True)
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !**", ephemeral=True)
+
+    # --- Déclenchement d'un piège en attente (Magie de la Chasse) ---
+    if getattr(p, "pieges_poses", None):
+        msg_piege = declencher_pieges(p)
+        p.sauvegarder()
+        if msg_piege: await interaction.followup.send(msg_piege)
+        if p.pv_actuel <= 0:
+            return await interaction.followup.send(f"💀 **{p.nom}** est K.O. suite au déclenchement du piège !")
 
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: return await interaction.followup.send("❌ Sort introuvable.", ephemeral=True)
@@ -4921,6 +5303,18 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
             embed.add_field(name="☠️ Effets Zone appliqués", value="\n".join(lignes_effets), inline=False)
         cibles_defense += [(ps.user_id, ps.nom, total_reduit) for ps in persos_sec]
 
+    # --- MAÎTRE DES OMBRES : Sneak Attack — posé sur la cible, résolu dans _executer_defense ---
+    if "maitre_ombres" in p.sous_classes_unlocked and total > 0:
+        if "passif_ombres_lecture" in p.competences or "passif_ombres_predateur" in p.competences:
+            pct_sneak = 75
+        elif "passif_ombres_instinct" in p.competences:
+            pct_sneak = 50
+        else:
+            pct_sneak = 0
+        if pct_sneak > 0:
+            p_cible.effets["_sneak_attack_pending"] = {"pct": pct_sneak, "attaquant_nom": p.nom}
+            p_cible.sauvegarder()
+
     await log_combat(interaction, embed)
     await interaction.followup.send(
         embed=embed,
@@ -4953,6 +5347,7 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
 
     embed = discord.Embed(title="🛡️ Défense", color=0xF1C40F)
     degats_bruts = degats_subis
+    _sneak_bloque_par_esquive = False
     
     ## Calcul Malus Poison
     malus_poison = 0
@@ -5015,6 +5410,7 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
         
         if best_total >= degats_subis:
             degats_bruts = 0
+            _sneak_bloque_par_esquive = True
             embed.add_field(name="Résultat", value="💨 **ESQUIVE PARFAITE !**", inline=False)
         else:
             degats_bruts = int(degats_subis * 1.5)
@@ -5063,7 +5459,14 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
         
         # --- D. APPLICATION DE LA ROBUSTESSE UNIVERSELLE ---
     degats_finaux = degats_bruts
-    
+
+    # --- MAÎTRE DES OMBRES : Sneak Attack (bloqué uniquement par une Esquive réussie) ---
+    _sneak = p.effets.pop("_sneak_attack_pending", None)
+    if _sneak and not _sneak_bloque_par_esquive and degats_finaux > 0:
+        bonus_sneak = int(degats_finaux * _sneak["pct"] / 100)
+        degats_finaux += bonus_sneak
+        embed.add_field(name="🗡️ Sneak Attack", value=f"**{_sneak.get('attaquant_nom', 'L\'attaquant')}** vous a pris au dépourvu : +{bonus_sneak} dégâts (+{_sneak['pct']}%) !", inline=False)
+
     if not perce_armure: # <--- NOUVEAU : On vérifie que l'attaque ne perce pas l'armure
         robustesse_val = p.get_robustesse()
         if degats_finaux > 0 and robustesse_val > 0:
@@ -6540,8 +6943,21 @@ async def fin_combat(interaction: discord.Interaction):
         p.sentence_target_id = 0; p.sentence_targets = []
         p.effets.pop("_indestructible_used", None)
         msg += "\n📜 **Inquisiteur** : Sentence(s) levée(s)."
-    
-    
+    if "maitre_arsenal" in p.sous_classes_unlocked:
+        p.elan_actuel = 0; p.dernier_type_arme = ""
+        msg += "\n🌀 **Maître d'Arsenal** : Élan retombé à 0."
+    if "moine_poing_vide" in p.sous_classes_unlocked:
+        p.souffle_phase = 0
+        msg += "\n🌬️ **Moine du Poing Vide** : Souffle réinitialisé (Inspire)."
+    if "maitre_ombres" in p.sous_classes_unlocked:
+        p.effets.pop("_sneak_attack_pending", None)
+        msg += "\n🗡️ **Maître des Ombres** : phase de Chasse/Traque réinitialisée."
+    if "magie_chasse" in p.sous_classes_unlocked:
+        p.familier_pv = 0; p.familier_pv_max = 0; p.familier_actif = 0
+        p.pieges_poses = []
+        msg += "\n🐾 **Magie de la Chasse** : Familier rappelé, pièges désamorcés."
+
+
     # Reset cooldowns (en tours de combat — remis à zéro en fin de combat)
     if p.cooldowns:
         p.cooldowns = {}
@@ -6638,7 +7054,15 @@ async def repos(interaction: discord.Interaction):
         p.festin = 0
     if "magie_elementaire" in p.sous_classes_unlocked:
         p.charges_elementaires = []
-    
+    if "maitre_arsenal" in p.sous_classes_unlocked:
+        p.elan_actuel = 0; p.dernier_type_arme = ""
+    if "moine_poing_vide" in p.sous_classes_unlocked:
+        p.souffle_phase = 0
+    if "maitre_ombres" in p.sous_classes_unlocked:
+        p.effets.pop("_sneak_attack_pending", None)
+    if "magie_chasse" in p.sous_classes_unlocked:
+        p.familier_actif = 0; p.pieges_poses = []
+
     p.sauvegarder()
     await interaction.response.send_message("💤 **Repos Long** : PV, Ressources, Effets et États de combat restaurés.")
 
