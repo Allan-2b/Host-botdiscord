@@ -5465,7 +5465,8 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
     if _sneak and not _sneak_bloque_par_esquive and degats_finaux > 0:
         bonus_sneak = int(degats_finaux * _sneak["pct"] / 100)
         degats_finaux += bonus_sneak
-        embed.add_field(name="🗡️ Sneak Attack", value=f"**{_sneak.get('attaquant_nom', 'L\'attaquant')}** vous a pris au dépourvu : +{bonus_sneak} dégâts (+{_sneak['pct']}%) !", inline=False)
+        nom_attaquant_sneak = _sneak.get("attaquant_nom") or "L'attaquant"
+        embed.add_field(name="🗡️ Sneak Attack", value=f"**{nom_attaquant_sneak}** vous a pris au dépourvu : +{bonus_sneak} dégâts (+{_sneak['pct']}%) !", inline=False)
 
     if not perce_armure: # <--- NOUVEAU : On vérifie que l'attaque ne perce pas l'armure
         robustesse_val = p.get_robustesse()
