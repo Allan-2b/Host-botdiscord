@@ -3427,15 +3427,16 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
         p.pv_actuel = min(p.pv_max, p.pv_actuel + total)
         msg_effet = f"\n💚 **Soin :** +{total} PV"
     elif not skill_data.get("reduce_dmg_dynamic"):
+        # --- Drakéide : appliqué aux dégâts finaux (même point que /clash) ---
         if p.race == "Drakéide" and p.niveau >= 3:
             drake_bonus_ab = (p.niveau // 3) * 3
             total += drake_bonus_ab
             visuel.append(f"🐲(+{drake_bonus_ab} Drakéide)")
-        
+
         if "mutilation" in p.effets:
             total = int(total * 0.75)
             visuel.append("(-25% Mutilé)")
-            
+
         msg_effet = f"\n💥 **Puissance :** {total}"
     
     appliquer_cooldown(p, sort)
@@ -5238,6 +5239,7 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     # --- MISE À JOUR last_action_type + état Moine ---
     msg_moine_transition = maj_etat_moine(p, skill_data, visuel)
 
+    # --- Drakéide : appliqué aux dégâts finaux (même point que /clash) ---
     if p.race == "Drakéide" and p.niveau >= 3:
         drake_bonus_atk = (p.niveau // 3) * 3
         total += drake_bonus_atk
