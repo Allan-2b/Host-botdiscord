@@ -3178,12 +3178,12 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
     if attaquant and "magie_chasse" in attaquant.sous_classes_unlocked:
         if data.get("invoque_familier"):
             if not attaquant.familier_actif:
-                attaquant.familier_pv_max = max(10, int(attaquant.pv_max * 0.3))
+                attaquant.familier_pv_max = _familier_pv_max_calc(attaquant)
                 attaquant.familier_pv = attaquant.familier_pv_max
                 attaquant.familier_actif = 1
                 msg.append(f"🐾 **Familier invoqué** ({attaquant.familier_pv}/{attaquant.familier_pv_max} PV) !")
             elif defenseur:
-                degats_familier = attaquant.niveau
+                degats_familier = _familier_degats_base(attaquant)
                 defenseur.pv_actuel -= degats_familier
                 msg.append(f"🐾 **Familier** : attaque immédiate pour {degats_familier} dégâts !")
         if "soigne_familier_pct" in data:
@@ -3192,7 +3192,7 @@ def traiter_effets_json(data_json: str, attaquant: Personnage, defenseur: Person
                 attaquant.familier_pv = min(attaquant.familier_pv_max, attaquant.familier_pv + soin)
                 msg.append(f"🐾 **Familier soigné** : +{soin} PV ({attaquant.familier_pv}/{attaquant.familier_pv_max}).")
             else:
-                attaquant.familier_pv_max = max(10, int(attaquant.pv_max * 0.3))
+                attaquant.familier_pv_max = _familier_pv_max_calc(attaquant)
                 attaquant.familier_pv = max(1, attaquant.familier_pv_max // 2)
                 attaquant.familier_actif = 1
                 msg.append(f"🐾 **Familier rappelé** à demi-PV ({attaquant.familier_pv}/{attaquant.familier_pv_max}).")
@@ -3225,6 +3225,55 @@ def declencher_pieges(p: Personnage) -> str:
         p.ajouter_effet(code, valeur)
         lignes.append(f"✨ **{code.capitalize()}** ({valeur}) appliqué !")
     return "\n".join(lignes)
+
+
+def _familier_pv_max_calc(p: Personnage) -> int:
+    """PV max du Familier de Chasse : 30% des PV max du dresseur, doublés avec Évolution (P4)."""
+    base = max(10, int(p.pv_max * 0.3))
+    if "passif_chasse_evolution" in p.competences:
+        base *= 2
+    return base
+
+
+def _familier_degats_base(p: Personnage) -> int:
+    """Dégâts de l'attaque automatique du Familier : niveau du dresseur, doublés avec Évolution (P4)."""
+    deg = p.niveau
+    if "passif_chasse_evolution" in p.competences:
+        deg *= 2
+    return deg
+
+
+def _familier_auto_contrat(p: Personnage) -> str:
+    """Palier 1 [Premier Contrat] : invoque automatiquement le Familier, gratuit, 1x/combat."""
+    if not ("magie_chasse" in p.sous_classes_unlocked and "passif_chasse_premier_contrat" in p.competences):
+        return ""
+    if p.familier_actif or p.effets.get("_familier_contrat_utilise"):
+        return ""
+    p.familier_pv_max = _familier_pv_max_calc(p)
+    p.familier_pv = p.familier_pv_max
+    p.familier_actif = 1
+    p.effets["_familier_contrat_utilise"] = True
+    return f"🐾 **[Premier Contrat]** : le Familier de Chasse de **{p.nom}** apparaît ({p.familier_pv}/{p.familier_pv_max} PV) !"
+
+
+def _familier_frappe_fin_tour(p: Personnage, p_cible: Personnage, sort_data_json: str) -> str:
+    """Attaque automatique du Familier en fin de tour (sur la dernière cible), sauf si le sort
+    joué déclenche déjà lui-même une action du Familier (évite le double comptage)."""
+    if not (p_cible and "magie_chasse" in p.sous_classes_unlocked and p.familier_actif):
+        return ""
+    try:
+        d = json.loads(sort_data_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        d = {}
+    if d.get("familier_attaque_mult") or d.get("invoque_familier"):
+        return ""
+    degats = _familier_degats_base(p)
+    p_cible.pv_actuel -= degats
+    msg = f"🐾 **Familier** : attaque automatique en fin de tour sur **{p_cible.nom}** pour {degats} dégâts !"
+    if "passif_chasse_instinct_meute" in p.competences:
+        p_cible.ajouter_effet("poison", 1)
+        msg += " ☠️ Poison appliqué (Instinct de Meute)."
+    return msg
 
 
 def verifier_cooldown(personnage: Personnage, sort_ref: str):
@@ -3300,6 +3349,12 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible d'agir.", ephemeral=True)
     if "no_bonus_action" in p.effets:
         return await interaction.followup.send("🎯 **Paralysie Neurale** : Vous ne pouvez pas utiliser d'Action Bonus ce tour !", ephemeral=True)
+
+    # --- MAGIE DE LA CHASSE : Premier Contrat (auto-invocation gratuite, 1x/combat) ---
+    msg_familier_contrat = _familier_auto_contrat(p)
+    if msg_familier_contrat:
+        p.sauvegarder()
+        await interaction.followup.send(msg_familier_contrat)
 
     # --- Déclenchement d'un piège en attente (Magie de la Chasse) ---
     if getattr(p, "pieges_poses", None):
@@ -3763,6 +3818,7 @@ async def _executer_tour(interaction: discord.Interaction, perso_noms_args: list
         if p.designation_stacks > 0: hud_v4 += f"\n🎯 **Désignation** ({p.designation_stacks} stack(s))"
         if p.sentence_targets: hud_v4 += f"\n📜 **Sentence** prononcée"
         if p.passe_active: hud_v4 += f"\n⚔️ **Passe active !**"
+        if getattr(p, "familier_actif", 0): hud_v4 += f"\n🐾 **Familier** : {p.familier_pv}/{p.familier_pv_max} PV"
 
         # --- INITIATIVE ---
         d1 = random.randint(1, 20)
@@ -4060,6 +4116,12 @@ async def clash(interaction: discord.Interaction, sort: str, cible: str, descrip
     if is_stun_actif(p_attaquant): return await interaction.followup.send("💫 **Étourdi !** Impossible de lancer un clash.", ephemeral=True)
     if "gel" in p_attaquant.effets: return await interaction.followup.send("❄️ **Gelé !** Impossible de bouger.", ephemeral=True)
 
+    # --- MAGIE DE LA CHASSE : Premier Contrat (auto-invocation gratuite, 1x/combat) ---
+    msg_familier_contrat = _familier_auto_contrat(p_attaquant)
+    if msg_familier_contrat:
+        p_attaquant.sauvegarder()
+        await interaction.followup.send(msg_familier_contrat)
+
     # Résolution de la cible depuis "user_id:nom"
     p_cible_clash = parse_cible_arg(cible)
     if not p_cible_clash: return await interaction.followup.send("❌ Cible introuvable.", ephemeral=True)
@@ -4248,7 +4310,13 @@ async def _executer_riposte(interaction: discord.Interaction, sort: str, descrip
     # --- VÉRIFICATIONS DÉFENSEUR ---
     if p_defenseur.pv_actuel <= 0: return await interaction.followup.send("💀 K.O.", ephemeral=True)
     if is_stun_actif(p_defenseur): return await interaction.followup.send("💫 **Étourdi !** Impossible de riposter.", ephemeral=True)
-    
+
+    # --- MAGIE DE LA CHASSE : Premier Contrat (auto-invocation gratuite, 1x/combat) ---
+    msg_familier_contrat_def = _familier_auto_contrat(p_defenseur)
+    if msg_familier_contrat_def:
+        p_defenseur.sauvegarder()
+        await interaction.followup.send(msg_familier_contrat_def)
+
     sort = resolve_sort_ref(sort)
     if sort not in SKILLS_DB: 
         PENDING_CLASHES[user_id] = clash_data 
@@ -4892,6 +4960,12 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     if is_stun_actif(p): return await interaction.followup.send("💫 **Étourdi !**", ephemeral=True)
     if "gel" in p.effets: return await interaction.followup.send("❄️ **Gelé !**", ephemeral=True)
 
+    # --- MAGIE DE LA CHASSE : Premier Contrat (auto-invocation gratuite, 1x/combat) ---
+    msg_familier_contrat = _familier_auto_contrat(p)
+    if msg_familier_contrat:
+        p.sauvegarder()
+        await interaction.followup.send(msg_familier_contrat)
+
     # --- Déclenchement d'un piège en attente (Magie de la Chasse) ---
     if getattr(p, "pieges_poses", None):
         msg_piege = declencher_pieges(p)
@@ -5348,6 +5422,14 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
         view=build_defense_view(cibles_defense, perce_armure_atk),
     )
 
+    # --- MAGIE DE LA CHASSE : attaque automatique du Familier en fin de tour ---
+    msg_familier_auto = _familier_frappe_fin_tour(p, p_cible, json_data)
+    if msg_familier_auto:
+        p.sauvegarder(); p_cible.sauvegarder()
+        await interaction.followup.send(msg_familier_auto)
+        if p_cible.pv_actuel <= 0:
+            await interaction.followup.send(f"💀 **{p_cible.nom}** est mis(e) K.O. par le Familier !")
+
 # 5. DEFENSE (Modifiée - Réduction Passive)
 # Logique extraite dans _executer_defense() pour être réutilisable à la fois par
 # la commande /defense ET par le bouton "🛡️ Défendre" posé sur les embeds de
@@ -5358,6 +5440,18 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
     p: Personnage = Personnage.charger_par_nom(interaction.user.id, personnage) if personnage else Personnage.charger(interaction.user.id)
     if not p: return await interaction.response.send_message("Pas de fiche.", ephemeral=True)
     if p.pv_actuel <= 0: return await interaction.response.send_message("💀 K.O.", ephemeral=True)
+
+    # --- MAGIE DE LA CHASSE : [Pacte Ultime] (P5) — le Familier se sacrifie, 1x/combat ---
+    if ("magie_chasse" in p.sous_classes_unlocked and "passif_chasse_pacte_ultime" in p.competences
+            and p.familier_actif and not p.effets.get("_pacte_ultime_utilise")):
+        p.effets["_pacte_ultime_utilise"] = True
+        p.effets.pop("_sneak_attack_pending", None)
+        p.familier_pv = 0
+        p.familier_actif = 0
+        p.sauvegarder()
+        embed_pacte = discord.Embed(title="🐾 Pacte Ultime", color=0xF1C40F)
+        embed_pacte.description = f"Le Familier de **{p.nom}** se jette devant le coup et absorbe **{degats_subis}** dégâts à sa place !\n💥 **0 dégâts** subis. Le Familier se retire (0 PV)."
+        return await interaction.response.send_message(embed=embed_pacte)
 
     # --- A. ÉTOURDISSEMENT (Bloquant Total) ---
     if is_stun_actif(p):
@@ -6995,6 +7089,7 @@ async def fin_combat(interaction: discord.Interaction):
     if "magie_chasse" in p.sous_classes_unlocked:
         p.familier_pv = 0; p.familier_pv_max = 0; p.familier_actif = 0
         p.pieges_poses = []
+        p.effets.pop("_familier_contrat_utilise", None); p.effets.pop("_pacte_ultime_utilise", None)
         msg += "\n🐾 **Magie de la Chasse** : Familier rappelé, pièges désamorcés."
 
 
@@ -7102,6 +7197,7 @@ async def repos(interaction: discord.Interaction):
         p.effets.pop("_sneak_attack_pending", None)
     if "magie_chasse" in p.sous_classes_unlocked:
         p.familier_actif = 0; p.pieges_poses = []
+        p.effets.pop("_familier_contrat_utilise", None); p.effets.pop("_pacte_ultime_utilise", None)
 
     p.sauvegarder()
     await interaction.response.send_message("💤 **Repos Long** : PV, Ressources, Effets et États de combat restaurés.")
