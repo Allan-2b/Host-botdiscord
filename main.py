@@ -3428,8 +3428,9 @@ async def action_bonus(interaction: discord.Interaction, sort: str, description:
         msg_effet = f"\n💚 **Soin :** +{total} PV"
     elif not skill_data.get("reduce_dmg_dynamic"):
         if p.race == "Drakéide" and p.niveau >= 3:
-            total += (p.niveau // 3)
-            visuel.append("🐲")
+            drake_bonus_ab = (p.niveau // 3) * 3
+            total += drake_bonus_ab
+            visuel.append(f"🐲(+{drake_bonus_ab} Drakéide)")
         
         if "mutilation" in p.effets:
             total = int(total * 0.75)
@@ -5238,8 +5239,9 @@ async def attaque(interaction: discord.Interaction, sort: str, cible: str, descr
     msg_moine_transition = maj_etat_moine(p, skill_data, visuel)
 
     if p.race == "Drakéide" and p.niveau >= 3:
-        total += (p.niveau // 3)
-        visuel.append(f"🐲(+{p.niveau//3} Drakéide)")
+        drake_bonus_atk = (p.niveau // 3) * 3
+        total += drake_bonus_atk
+        visuel.append(f"🐲(+{drake_bonus_atk} Drakéide)")
 
     msg_vamp = ""
     if p.race == "Vampire" and total > 0:
@@ -5357,13 +5359,23 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
 
     # --- A. ÉTOURDISSEMENT (Bloquant Total) ---
     if is_stun_actif(p):
-        p.pv_actuel -= degats_subis
+        degats_stun = degats_subis
+        # Sneak Attack : un stun n'est pas une Esquive, donc le bonus s'applique quand même.
+        _sneak_stun = p.effets.pop("_sneak_attack_pending", None)
+        msg_sneak_stun = ""
+        if _sneak_stun and degats_stun > 0:
+            bonus_sneak_stun = int(degats_stun * _sneak_stun["pct"] / 100)
+            degats_stun += bonus_sneak_stun
+            nom_attaquant_sneak_stun = _sneak_stun.get("attaquant_nom") or "L'attaquant"
+            msg_sneak_stun = f"\n🗡️ **Sneak Attack** : **{nom_attaquant_sneak_stun}** vous a pris au dépourvu : +{bonus_sneak_stun} dégâts (+{_sneak_stun['pct']}%) !"
+        p.pv_actuel -= degats_stun
         if p.pv_actuel < 0: p.pv_actuel = 0
         p.sauvegarder()
-        return await interaction.response.send_message(f"💫 **Vous êtes Étourdi !** Impossible de vous défendre.\n💥 Vous subissez **{degats_subis}** dégâts plein pot. (PV: {p.pv_actuel})", ephemeral=True)
-    
+        return await interaction.response.send_message(f"💫 **Vous êtes Étourdi !** Impossible de vous défendre.\n💥 Vous subissez **{degats_stun}** dégâts plein pot. (PV: {p.pv_actuel}){msg_sneak_stun}", ephemeral=True)
+
     # --- NOUVEAU : INVULNÉRABILITÉ (Intervention Divine) ---
     if "invulnerable" in p.effets:
+        p.effets.pop("_sneak_attack_pending", None)
         embed = discord.Embed(title="Invulnérabilité", color=0xF1C40F)
         embed.description = f" Vous ignorez totalement les **{degats_subis}** dégâts."
         return await interaction.response.send_message(embed=embed)
@@ -5380,6 +5392,7 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
     # --- DÉVIATION TOTALE (Oracle P4) : annule complètement l'attaque ---
     if "deviation_totale" in p.effets:
         del p.effets["deviation_totale"]
+        p.effets.pop("_sneak_attack_pending", None)
         p.sauvegarder()
         embed_dev = discord.Embed(title="🔮 Déviation Totale", color=0x9b59b6)
         embed_dev.description = f"**{p.nom}** était protégé par une **Déviation Totale** !\n💫 L'attaque est annulée — **0 dégâts** !"
@@ -5388,6 +5401,7 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
     # --- REDIRECTION ACTIVE (Oracle P5) : annule et redirige (MJ gère la nouvelle cible) ---
     if "redirection_active" in p.effets:
         del p.effets["redirection_active"]
+        p.effets.pop("_sneak_attack_pending", None)
         p.sauvegarder()
         embed_red = discord.Embed(title="🔮 Déviation Absolue", color=0x9b59b6)
         embed_red.description = f"**{p.nom}** était protégé par une **Déviation Absolue** !\n↩️ L'attaque est redirigée vers un ennemi — le MJ désigne la nouvelle cible !"
