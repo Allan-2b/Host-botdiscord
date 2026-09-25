@@ -3252,7 +3252,7 @@ def _familier_auto_contrat(p: Personnage) -> str:
     p.familier_pv_max = _familier_pv_max_calc(p)
     p.familier_pv = p.familier_pv_max
     p.familier_actif = 1
-    p.effets["_familier_contrat_utilise"] = True
+    p.effets["_familier_contrat_utilise"] = {"duree": 999, "valeur": 1}
     return f"🐾 **[Premier Contrat]** : le Familier de Chasse de **{p.nom}** apparaît ({p.familier_pv}/{p.familier_pv_max} PV) !"
 
 
@@ -5444,7 +5444,7 @@ async def _executer_defense(interaction: discord.Interaction, type_def, degats_s
     # --- MAGIE DE LA CHASSE : [Pacte Ultime] (P5) — le Familier se sacrifie, 1x/combat ---
     if ("magie_chasse" in p.sous_classes_unlocked and "passif_chasse_pacte_ultime" in p.competences
             and p.familier_actif and not p.effets.get("_pacte_ultime_utilise")):
-        p.effets["_pacte_ultime_utilise"] = True
+        p.effets["_pacte_ultime_utilise"] = {"duree": 999, "valeur": 1}
         p.effets.pop("_sneak_attack_pending", None)
         p.familier_pv = 0
         p.familier_actif = 0
